@@ -1,0 +1,24 @@
+# --- Builder
+FROM node:20.18.0-alpine AS builder
+WORKDIR /web
+COPY web/package*.json ./
+COPY web/vite.config.* ./
+COPY web/eslint.config.js ./
+COPY web/tsconfig*.json ./
+COPY web/src ./src
+COPY web/public ./public
+RUN npm ci
+RUN npm run build
+
+# --- Runtime (Caddy)
+FROM caddy:2.8-alpine
+WORKDIR /srv
+COPY --from=builder /web/dist/ /srv
+COPY <<'CADDY' /etc/caddy/Caddyfile
+:8080 {
+  root * /srv
+  file_server
+  encode zstd gzip
+}
+CADDY
+EXPOSE 8080
