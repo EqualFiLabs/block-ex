@@ -1,7 +1,11 @@
 SHELL := /bin/bash
 COMPOSE := docker compose -f ops/docker-compose.yml
 
+<<<<<<< ours
 .PHONY: bootstrap migrate up down logs psql tail build-images
+=======
+.PHONY: bootstrap migrate up down logs psql tail build-images health
+>>>>>>> theirs
 
 bootstrap:
 	@echo "Using Node version from .nvmrc"; nvm use || true
@@ -31,3 +35,9 @@ tail:
 
 psql:
 	docker exec -it $$(docker ps --filter name=postgres --format '{{.ID}}') psql -U explorer -d explorer
+<<<<<<< ours
+=======
+
+health:
+	$(COMPOSE) ps --format 'table {{.Service}}\t{{.State}}\t{{.Health}}'
+>>>>>>> theirs

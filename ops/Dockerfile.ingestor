@@ -2,18 +2,12 @@
 FROM rust:1-bookworm AS builder
 WORKDIR /app
 
-# Cache deps
+# Build binary
 COPY Cargo.toml Cargo.lock ./
 COPY api/Cargo.toml api/Cargo.toml
 COPY ingestor/Cargo.toml ingestor/Cargo.toml
-RUN mkdir -p api/src ingestor/src && \
-    echo "fn main() { println!(\"stub\"); }" > api/src/main.rs && \
-    echo "fn main() { println!(\"stub\"); }" > ingestor/src/main.rs && \
-    cargo build -p ingestor --release
-
-# Build real binary
 COPY . .
-RUN cargo build -p ingestor --release
+RUN cargo build -p ingestor --release --locked
 
 # --- Runtime (distroless)
 FROM gcr.io/distroless/cc-debian12:nonroot AS runtime
