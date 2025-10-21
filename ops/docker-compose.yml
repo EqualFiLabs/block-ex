@@ -1,0 +1,122 @@
+version: "3.9"
+
+x-common-env: &common-env
+  NETWORK: "stagenet"
+  FINALITY_WINDOW: "30"
+  RUST_LOG: "info"
+
+services:
+  monerod:
+    image: ghcr.io/sethforprivacy/simple-monerod:latest
+    restart: unless-stopped
+    command:
+      - "--stagenet"
+      - "--prune-blockchain"
+      - "--rpc-restricted-bind-port=38081"
+      - "--confirm-external-bind"
+      - "--out-peers=32"
+      - "--in-peers=32"
+      - "--enable-dns-blocklist"
+    ports:
+      - "38081:38081"  # RPC
+      - "38082:38082"  # ZMQ
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:38081/json_rpc"]
+      interval: 30s
+      timeout: 3s
+      retries: 20
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: explorer
+      POSTGRES_PASSWORD: explorer
+      POSTGRES_DB: explorer
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U explorer -d explorer"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  api:
+    image: explorer-api:dev
+    depends_on:
+      monerod:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      <<: *common-env
+      DATABASE_URL: "postgres://explorer:explorer@postgres:5432/explorer"
+      XMR_RPC_URL: "http://monerod:38081/json_rpc"
+      XMR_ZMQ_URL: "tcp://monerod:38082"
+      REDIS_URL: "redis://redis:6379"
+    ports:
+      - "8081:8081"
+    command: ["/app/api", "serve", "--bind", "0.0.0.0:8081"]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:8081/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 20
+
+  ingestor:
+    image: explorer-ingestor:dev
+    depends_on:
+      monerod:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    environment:
+      <<: *common-env
+      DATABASE_URL: "postgres://explorer:explorer@postgres:5432/explorer"
+      XMR_RPC_URL: "http://monerod:38081/json_rpc"
+      XMR_ZMQ_URL: "tcp://monerod:38082"
+    command: ["/app/ingestor", "run"]
+    restart: unless-stopped
+
+  web:
+    image: explorer-web:dev
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      API_BASE_URL: "http://api:8081"
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+
+  # clickhouse: # Optional analytics (commented by default)
+  #   image: clickhouse/clickhouse-server:24.8-alpine
+  #   restart: unless-stopped
+  #   ulimits:
+  #     nofile:
+  #       soft: 262144
+  #       hard: 262144
+  #   ports:
+  #     - "8123:8123"
+  #     - "9000:9000"
+  #   healthcheck:
+  #     test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:8123/ping"]
+  #     interval: 10s
+  #     timeout: 3s
+  #     retries: 20
+
+volumes:
+  pgdata:
