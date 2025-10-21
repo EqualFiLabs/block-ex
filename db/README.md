@@ -18,3 +18,11 @@ This project uses:
 - `pg_partman` runs as a normal extension. To pre-create upcoming partitions or maintain them periodically:
   - `SELECT partman.run_maintenance();`
 - We do **not** enable retention in production until logs/backups are in place.
+
+### pg_partman maintenance
+- Pre-create partitions (typically run daily via cron):
+```sql
+SELECT partman.run_maintenance();
+```
+
+* We **do not** enable automated retention yet. When ready, set retention configs per table and verify backups.

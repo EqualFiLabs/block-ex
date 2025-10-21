@@ -26,7 +26,10 @@ services:
       retries: 20
 
   postgres:
-    image: postgres:16-alpine
+    image: explorer-postgres:dev
+    build:
+      context: ..
+      dockerfile: ops/Dockerfile.postgres
     restart: unless-stopped
     environment:
       POSTGRES_USER: explorer
