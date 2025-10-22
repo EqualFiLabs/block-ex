@@ -252,6 +252,7 @@ fn prepare_tx(json_str: &str, fallback_hash: Option<&str>) -> Result<PreparedTx>
         .or(fallback_hash)
         .context("transaction hash missing")?;
     let hash = hex::decode(hash_str).context("decode tx hash")?;
+    let hash_hex = hash_str.to_string();
 
     let size = value_u64(&value, &["size", "blob_size", "weight"])
         .unwrap_or_else(|| json_str.len() as u64);
@@ -279,6 +280,7 @@ fn prepare_tx(json_str: &str, fallback_hash: Option<&str>) -> Result<PreparedTx>
 
     Ok(PreparedTx {
         hash,
+        hash_hex,
         fee,
         size_bytes,
         version,
@@ -375,6 +377,11 @@ async fn persist_block(
         .context("insert tx")?;
     }
 
+    let included_hex: Vec<String> = txs.iter().map(|tx| tx.hash_hex.clone()).collect();
+    Store::evict_mempool_on_inclusion(&mut db_tx, &included_hex)
+        .await
+        .context("evict mempool on inclusion")?;
+
     db_tx.commit().await.context("commit block")?;
     checkpoint
         .set(i64::try_from(header.height).context("height overflow")?)
@@ -386,6 +393,7 @@ async fn persist_block(
 
 struct PreparedTx {
     hash: Vec<u8>,
+    hash_hex: String,
     fee: Option<i64>,
     size_bytes: i32,
     version: i32,

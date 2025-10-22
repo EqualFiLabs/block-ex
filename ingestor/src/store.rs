@@ -1,5 +1,5 @@
 use anyhow::Result;
-use sqlx::{postgres::PgQueryResult, PgPool, Postgres, Transaction};
+use sqlx::{postgres::PgQueryResult, PgPool, Postgres, Row, Transaction};
 
 #[derive(Clone)]
 pub struct Store {
@@ -149,5 +149,137 @@ ON CONFLICT (tx_hash, idx_in_tx) DO NOTHING
         .execute(&mut **tx)
         .await
         .map_err(Into::into)
+    }
+
+    pub async fn evict_mempool_on_inclusion(
+        tx: &mut Transaction<'_, Postgres>,
+        included_hashes_hex: &[String],
+    ) -> Result<PgQueryResult> {
+        for hash in included_hashes_hex {
+            let _ = sqlx::query("DELETE FROM public.mempool_txs WHERE tx_hash = decode($1,'hex')")
+                .bind(hash)
+                .execute(&mut **tx)
+                .await?;
+        }
+
+        Ok(PgQueryResult::default())
+    }
+
+    pub async fn requeue_mempool_from_block(
+        tx: &mut Transaction<'_, Postgres>,
+        block_height: i64,
+    ) -> Result<()> {
+        let rows = sqlx::query(
+            "SELECT encode(tx_hash, 'hex') AS h FROM public.txs WHERE block_height = $1",
+        )
+        .bind(block_height)
+        .fetch_all(&mut **tx)
+        .await?;
+
+        for row in rows {
+            if let Ok(hash) = row.try_get::<String, _>("h") {
+                sqlx::query(
+                    r#"INSERT INTO public.mempool_txs (tx_hash, first_seen, last_seen)
+                       VALUES (decode($1,'hex'), NOW(), NOW())
+                       ON CONFLICT (tx_hash) DO UPDATE SET last_seen = NOW()"#,
+                )
+                .bind(&hash)
+                .execute(&mut **tx)
+                .await?;
+            }
+        }
+
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Store;
+    use anyhow::Result;
+    use sqlx::{migrate::Migrator, PgPool};
+
+    static MIGRATOR: Migrator = sqlx::migrate!("../db/migrations");
+
+    async fn setup_pool() -> Result<Option<PgPool>> {
+        let database_url = match std::env::var("DATABASE_URL") {
+            Ok(url) => url,
+            Err(_) => return Ok(None),
+        };
+
+        let pool = PgPool::connect(&database_url).await?;
+        MIGRATOR.run(&pool).await?;
+        Ok(Some(pool))
+    }
+
+    #[tokio::test]
+    async fn evict_mempool_removes_included_transactions() -> Result<()> {
+        let Some(pool) = setup_pool().await? else {
+            eprintln!("skipping evict_mempool_removes_included_transactions: DATABASE_URL not set");
+            return Ok(());
+        };
+
+        let mut tx = pool.begin().await?;
+        let hash = "01".repeat(32);
+
+        sqlx::query(
+            r#"INSERT INTO public.mempool_txs (tx_hash, first_seen, last_seen)
+               VALUES (decode($1,'hex'), NOW(), NOW())"#,
+        )
+        .bind(&hash)
+        .execute(&mut *tx)
+        .await?;
+
+        Store::evict_mempool_on_inclusion(&mut tx, &[hash.clone()]).await?;
+
+        let remaining: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM public.mempool_txs WHERE tx_hash = decode($1,'hex')",
+        )
+        .bind(&hash)
+        .fetch_one(&mut *tx)
+        .await?;
+
+        assert_eq!(remaining, 0);
+        tx.rollback().await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn requeue_mempool_inserts_transactions() -> Result<()> {
+        let Some(pool) = setup_pool().await? else {
+            eprintln!("skipping requeue_mempool_inserts_transactions: DATABASE_URL not set");
+            return Ok(());
+        };
+
+        let mut tx = pool.begin().await?;
+        let hash = "02".repeat(32);
+        let block_height = 42_i64;
+
+        sqlx::query(
+            r#"INSERT INTO public.txs (
+                    tx_hash, block_height, block_timestamp, in_mempool, fee_nanos,
+                    size_bytes, version, unlock_time, extra, rct_type, proof_type,
+                    bp_plus, num_inputs, num_outputs
+                ) VALUES (decode($1,'hex'), $2, NOW(), FALSE, NULL,
+                          1, 2, 0, '{}'::jsonb, 0, NULL,
+                          TRUE, 0, 0)"#,
+        )
+        .bind(&hash)
+        .bind(block_height)
+        .execute(&mut *tx)
+        .await?;
+
+        Store::requeue_mempool_from_block(&mut tx, block_height).await?;
+
+        let in_mempool: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM public.mempool_txs WHERE tx_hash = decode($1,'hex')",
+        )
+        .bind(&hash)
+        .fetch_one(&mut *tx)
+        .await?;
+
+        assert_eq!(in_mempool, 1);
+        tx.rollback().await?;
+        Ok(())
     }
 }
