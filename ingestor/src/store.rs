@@ -151,6 +151,31 @@ ON CONFLICT (tx_hash, idx_in_tx) DO NOTHING
         .map_err(Into::into)
     }
 
+    pub async fn record_tip(
+        tx: &mut Transaction<'_, Postgres>,
+        height: i64,
+        hash: &[u8],
+        prev_hash: &[u8],
+    ) -> Result<()> {
+        sqlx::query!(
+            r#"INSERT INTO public.chain_tips (height, hash, prev_hash) VALUES ($1,$2,$3)
+               ON CONFLICT (height) DO UPDATE SET hash = EXCLUDED.hash, prev_hash = EXCLUDED.prev_hash"#,
+            height,
+            hash,
+            prev_hash
+        )
+        .execute(&mut **tx)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn block_hash_at(&self, height: i64) -> Result<Option<Vec<u8>>> {
+        let rec = sqlx::query!("SELECT hash FROM public.blocks WHERE height=$1", height)
+            .fetch_optional(self.pool())
+            .await?;
+        Ok(rec.and_then(|r| r.hash))
+    }
+
     pub async fn evict_mempool_on_inclusion(
         tx: &mut Transaction<'_, Postgres>,
         included_hashes_hex: &[String],

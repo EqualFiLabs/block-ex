@@ -4,6 +4,7 @@ use anyhow::{anyhow, Context, Result};
 use clap::Parser;
 use futures::{stream, StreamExt, TryStreamExt};
 use governor::{DefaultDirectRateLimiter, Quota, RateLimiter};
+use hex::FromHex;
 use ingestor::{
     checkpoint::Checkpoint,
     codec::{analyze_tx, parse_tx_json},
@@ -107,6 +108,33 @@ async fn main() -> Result<()> {
 
         info!(height = height_u64, "processing block");
         let header = fetch_block_header(&rpc, &limiter, height_u64).await?;
+
+        let prev_hex = header.prev_hash.clone();
+        let prev_bytes = <[u8; 32]>::from_hex(&prev_hex).unwrap_or([0u8; 32]);
+        if let Some(expected_prev) = store
+            .block_hash_at((header.height as i64) - 1)
+            .await
+            .context("fetch previous hash")?
+        {
+            if expected_prev.as_slice() != &prev_bytes {
+                warn!(
+                    height = header.height,
+                    "REORG DETECTED at height {}: header.prev != stored hash(h-1)", header.height
+                );
+                heal_reorg(
+                    header.height as i64,
+                    &store,
+                    &rpc,
+                    std::env::var("FINALITY_WINDOW")
+                        .ok()
+                        .and_then(|s| s.parse().ok())
+                        .unwrap_or(30),
+                )
+                .await?;
+                continue;
+            }
+        }
+
         let block = fetch_block_json(&rpc, &limiter, &header).await?;
         let block_value: Value = serde_json::from_str(&block).context("parse block json")?;
 
@@ -382,6 +410,15 @@ async fn persist_block(
         .await
         .context("evict mempool on inclusion")?;
 
+    Store::record_tip(
+        &mut db_tx,
+        i64::try_from(header.height).context("height overflow")?,
+        &hash_bytes,
+        &prev_hash_bytes,
+    )
+    .await
+    .context("record chain tip")?;
+
     db_tx.commit().await.context("commit block")?;
     checkpoint
         .set(i64::try_from(header.height).context("height overflow")?)
@@ -404,4 +441,9 @@ struct PreparedTx {
     bp_plus: bool,
     num_inputs: i32,
     num_outputs: i32,
+}
+
+async fn heal_reorg(height: i64, _store: &Store, _rpc: &Rpc, _finality_window: u64) -> Result<()> {
+    warn!(height, "heal_reorg not yet implemented");
+    Ok(())
 }
