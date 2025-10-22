@@ -7,6 +7,7 @@ use governor::{DefaultDirectRateLimiter, Quota, RateLimiter};
 use ingestor::{
     checkpoint::Checkpoint,
     codec::{analyze_tx, parse_tx_json},
+    mempool::MempoolWatcher,
     rpc::{BlockHeader, Rpc},
     store::Store,
 };
@@ -33,6 +34,13 @@ struct Args {
     start_height: Option<u64>,
     #[arg(long, env = "LIMIT", help = "Optional limit of blocks to sync")]
     limit: Option<u64>,
+    #[arg(
+        long,
+        env = "XMR_ZMQ_URL",
+        default_value = "tcp://127.0.0.1:38082",
+        help = "Monero ZMQ publisher providing raw_tx/raw_block topics"
+    )]
+    zmq_url: String,
 }
 
 #[tokio::main]
@@ -53,6 +61,8 @@ async fn main() -> Result<()> {
         .context("failed to connect to postgres")?;
     let checkpoint = Checkpoint::new(store.pool().clone());
     let rpc = Rpc::new(&args.rpc_url);
+
+    MempoolWatcher::new(&args.zmq_url, rpc.clone(), store.clone()).spawn();
 
     let mut next_height = if let Some(start) = args.start_height {
         i64::try_from(start).context("start height overflow")?

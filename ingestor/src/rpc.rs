@@ -1,6 +1,7 @@
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 
 #[derive(Clone)]
 pub struct Rpc {
@@ -108,6 +109,26 @@ impl Rpc {
     pub async fn get_block_count(&self) -> Result<GetBlockCountResult> {
         self.call("get_block_count", ()).await
     }
+
+    pub async fn get_transaction_pool_hashes(&self) -> Result<Vec<String>> {
+        #[derive(Deserialize)]
+        struct R {
+            status: String,
+            #[serde(default)]
+            tx_hashes: Vec<String>,
+        }
+
+        let res: R = self
+            .call("get_transaction_pool_hashes", json!({}))
+            .await
+            .context("get_transaction_pool_hashes rpc")?;
+
+        if res.status == "OK" {
+            Ok(res.tx_hashes)
+        } else {
+            Err(anyhow!("get_transaction_pool_hashes status {}", res.status))
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -152,4 +173,65 @@ pub struct GetTransactionsResult {
 pub struct GetBlockCountResult {
     pub count: u64,
     pub status: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use httpmock::prelude::*;
+
+    #[tokio::test]
+    async fn transaction_pool_hashes_success() {
+        let server = MockServer::start();
+        let mock = server.mock(|when, then| {
+            when.method(POST).path("/").json_body(json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "get_transaction_pool_hashes",
+                "params": {}
+            }));
+            then.status(200).json_body(json!({
+                "result": {
+                    "status": "OK",
+                    "tx_hashes": ["abcdef"],
+                }
+            }));
+        });
+
+        let rpc = Rpc::new(server.url("/"));
+        let hashes = rpc
+            .get_transaction_pool_hashes()
+            .await
+            .expect("pool hashes success");
+
+        assert_eq!(hashes, vec!["abcdef".to_string()]);
+        mock.assert();
+    }
+
+    #[tokio::test]
+    async fn transaction_pool_hashes_non_ok_status() {
+        let server = MockServer::start();
+        let mock = server.mock(|when, then| {
+            when.method(POST).path("/").json_body(json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "get_transaction_pool_hashes",
+                "params": {}
+            }));
+            then.status(200).json_body(json!({
+                "result": {
+                    "status": "BUSY",
+                    "tx_hashes": ["abcdef"],
+                }
+            }));
+        });
+
+        let rpc = Rpc::new(server.url("/"));
+        let err = rpc.get_transaction_pool_hashes().await.unwrap_err();
+
+        assert!(err
+            .to_string()
+            .contains("get_transaction_pool_hashes status BUSY"));
+        mock.assert();
+    }
 }
