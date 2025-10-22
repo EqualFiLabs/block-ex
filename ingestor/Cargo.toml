@@ -10,6 +10,7 @@ hex = "0.4"
 reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+sqlx = { version = "0.7", features = ["postgres", "runtime-tokio-rustls", "macros"] }
 tokio = { version = "1.40.0", features = ["macros", "rt-multi-thread", "signal", "time"] }
 tracing = "0.1.40"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter", "fmt"] }
