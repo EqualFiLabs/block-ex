@@ -173,7 +173,7 @@ ON CONFLICT (tx_hash, idx_in_tx) DO NOTHING
         let rec = sqlx::query!("SELECT hash FROM public.blocks WHERE height=$1", height)
             .fetch_optional(self.pool())
             .await?;
-        Ok(rec.and_then(|r| r.hash))
+        Ok(rec.map(|r| r.hash))
     }
 
     pub async fn evict_mempool_on_inclusion(

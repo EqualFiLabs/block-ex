@@ -9,6 +9,7 @@ use ingestor::{
     checkpoint::Checkpoint,
     codec::{analyze_tx, parse_tx_json},
     mempool::MempoolWatcher,
+    reorg::heal_reorg,
     rpc::{BlockHeader, Rpc},
     store::Store,
 };
@@ -121,16 +122,11 @@ async fn main() -> Result<()> {
                     height = header.height,
                     "REORG DETECTED at height {}: header.prev != stored hash(h-1)", header.height
                 );
-                heal_reorg(
-                    header.height as i64,
-                    &store,
-                    &rpc,
-                    std::env::var("FINALITY_WINDOW")
-                        .ok()
-                        .and_then(|s| s.parse().ok())
-                        .unwrap_or(30),
-                )
-                .await?;
+                let finality_window = std::env::var("FINALITY_WINDOW")
+                    .ok()
+                    .and_then(|s| s.parse::<i64>().ok())
+                    .unwrap_or(30);
+                heal_reorg(header.height as i64, &store, &rpc, finality_window).await?;
                 continue;
             }
         }
@@ -441,9 +437,4 @@ struct PreparedTx {
     bp_plus: bool,
     num_inputs: i32,
     num_outputs: i32,
-}
-
-async fn heal_reorg(height: i64, _store: &Store, _rpc: &Rpc, _finality_window: u64) -> Result<()> {
-    warn!(height, "heal_reorg not yet implemented");
-    Ok(())
 }

@@ -147,6 +147,7 @@ pub struct BlockHeader {
     pub minor_version: u32,
     pub nonce: u64,
     pub reward: u64,
+    #[serde(default, alias = "block_size")]
     pub size: u64,
 }
 
