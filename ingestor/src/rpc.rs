@@ -104,6 +104,10 @@ impl Rpc {
         )
         .await
     }
+
+    pub async fn get_block_count(&self) -> Result<GetBlockCountResult> {
+        self.call("get_block_count", ()).await
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -141,5 +145,11 @@ pub struct GetTransactionsResult {
     pub txs_as_json: Vec<String>,
     #[serde(default)]
     pub missed_tx: Vec<String>,
+    pub status: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GetBlockCountResult {
+    pub count: u64,
     pub status: String,
 }

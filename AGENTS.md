@@ -1,0 +1,1 @@
+Each task should come with tests proving implemented functionality if possible.
