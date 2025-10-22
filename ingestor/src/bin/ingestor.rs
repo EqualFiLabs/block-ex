@@ -415,6 +415,13 @@ async fn persist_block(
     .await
     .context("record chain tip")?;
 
+    Store::upsert_soft_facts_for_block(
+        &mut db_tx,
+        i64::try_from(header.height).context("height overflow")?,
+    )
+    .await
+    .context("upsert soft facts")?;
+
     db_tx.commit().await.context("commit block")?;
     checkpoint
         .set(i64::try_from(header.height).context("height overflow")?)

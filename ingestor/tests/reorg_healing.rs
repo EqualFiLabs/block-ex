@@ -1,8 +1,8 @@
 use anyhow::{Context, Result};
 use httpmock::{prelude::*, Mock};
 use ingestor::{reorg::heal_reorg, rpc::Rpc, store::Store};
-use sqlx::{migrate::Migrator, PgPool};
 use serde_json::json;
+use sqlx::{migrate::Migrator, PgPool};
 
 static MIGRATOR: Migrator = sqlx::migrate!("../db/migrations");
 

@@ -169,6 +169,70 @@ ON CONFLICT (tx_hash, idx_in_tx) DO NOTHING
         Ok(())
     }
 
+    pub async fn upsert_soft_facts_for_block(
+        tx: &mut Transaction<'_, Postgres>,
+        height: i64,
+    ) -> Result<()> {
+        let rec = sqlx::query!(
+            r#"
+WITH per_tx AS (
+  SELECT
+    COALESCE(fee_nanos,0) AS fee,
+    NULLIF(size_bytes,0) AS size,
+    num_inputs,
+    (CASE WHEN size_bytes>0 THEN COALESCE(fee_nanos,0)::numeric / size_bytes::numeric ELSE NULL END) AS fee_rate
+  FROM public.txs WHERE block_height = $1
+),
+aggs AS (
+  SELECT
+    SUM(fee)::bigint AS total_fee,
+    AVG(NULLIF(num_inputs,0))::double precision AS avg_inputs,
+    (PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY fee_rate))::double precision AS median_fee_rate
+  FROM per_tx
+)
+SELECT
+  COALESCE(total_fee,0)::bigint AS total_fee,
+  COALESCE(avg_inputs,0::double precision) AS avg_inputs,
+  COALESCE(median_fee_rate,0::double precision) AS median_fee_rate
+FROM aggs
+"#,
+            height
+        )
+        .fetch_one(&mut **tx)
+        .await?;
+
+        let bp_total_bytes: i64 = 0;
+        let clsag_count: i32 = {
+            let r = sqlx::query!(
+                "SELECT COALESCE(SUM(num_inputs),0)::int AS c FROM public.txs WHERE block_height=$1",
+                height
+            )
+            .fetch_one(&mut **tx)
+            .await?;
+            r.c.unwrap_or(0)
+        };
+
+        sqlx::query!(
+            r#"
+INSERT INTO public.soft_facts
+(block_height, block_timestamp, total_fee, avg_ring_size, median_fee_rate, bp_total_bytes, clsag_count)
+SELECT b.height, b.block_timestamp, $2, $3, $4, $5, $6 FROM public.blocks b WHERE b.height = $1
+ON CONFLICT (block_height) DO UPDATE
+  SET total_fee=$2, avg_ring_size=$3, median_fee_rate=$4, bp_total_bytes=$5, clsag_count=$6
+"#,
+            height,
+            rec.total_fee,
+            rec.avg_inputs,
+            rec.median_fee_rate,
+            bp_total_bytes,
+            clsag_count
+        )
+        .execute(&mut **tx)
+        .await?;
+
+        Ok(())
+    }
+
     pub async fn block_hash_at(&self, height: i64) -> Result<Option<Vec<u8>>> {
         let rec = sqlx::query!("SELECT hash FROM public.blocks WHERE height=$1", height)
             .fetch_optional(self.pool())
