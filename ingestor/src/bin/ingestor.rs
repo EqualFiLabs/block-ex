@@ -1,16 +1,15 @@
-use std::{
-    collections::HashSet, convert::TryFrom, env, num::NonZeroU32, sync::Arc, time::Duration,
-};
+use std::{collections::HashSet, convert::TryFrom, env, sync::Arc, time::Duration};
 
 use anyhow::{anyhow, Context, Result};
 use clap::Parser;
 use futures::{stream, StreamExt, TryStreamExt};
-use governor::{DefaultDirectRateLimiter, Quota, RateLimiter};
+use governor::DefaultDirectRateLimiter;
 use hex::FromHex;
 use ingestor::{
     checkpoint::Checkpoint,
     cli::Args,
     codec::{analyze_tx, parse_tx_json},
+    limits,
     mempool::MempoolWatcher,
     reorg::heal_reorg,
     rpc::{BlockHeader, Rpc},
@@ -39,18 +38,8 @@ async fn main() -> Result<()> {
 
     let args = Args::parse();
 
-    let eff_rps = if args.bootstrap {
-        (args.rpc_rps as f32 * 2.5).ceil() as u32
-    } else {
-        args.rpc_rps
-    };
-    let quota = Quota::per_second(NonZeroU32::new(eff_rps.max(1)).unwrap());
-    let limiter = Arc::new(RateLimiter::direct(quota));
-    let conc = if args.bootstrap {
-        (args.ingest_concurrency * 2).max(args.ingest_concurrency + 4)
-    } else {
-        args.ingest_concurrency
-    };
+    let limiter = Arc::new(limits::make_limiter(args.rpc_rps, args.bootstrap));
+    let conc = limits::eff_concurrency(args.ingest_concurrency, args.bootstrap);
 
     info!("connecting to database");
     let store = Store::connect(&args.database_url)
