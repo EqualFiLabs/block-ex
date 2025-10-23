@@ -1,12 +1,11 @@
-use std::{collections::HashSet, sync::Arc};
+use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Result};
-use futures::{stream, StreamExt, TryStreamExt};
 use governor::DefaultDirectRateLimiter;
 use tokio::sync::{mpsc, Mutex};
-use tracing::warn;
 
 use crate::{
+    fetch::fetch_txs_adaptive,
     pipeline::{BlockMsg, Shutdown, TxMsg},
     rpc::MoneroRpc,
 };
@@ -75,57 +74,18 @@ async fn fetch_transactions(
         return Ok(Vec::new());
     }
 
-    let chunked = hashes
-        .chunks(100)
-        .map(|chunk| chunk.to_vec())
-        .collect::<Vec<_>>();
-
-    let rpc_clone = Arc::clone(rpc);
-    let limiter_clone = limiter.clone();
-    let stream = stream::iter(chunked.into_iter().map(move |chunk| {
-        let rpc = Arc::clone(&rpc_clone);
-        let limiter = limiter_clone.clone();
-        async move {
-            limiter.until_ready().await;
-            let res = rpc
-                .get_transactions(&chunk)
-                .await
-                .with_context(|| "fetch transactions batch")?;
-            if !res.missed_tx.is_empty() {
-                warn!(missed = res.missed_tx.len(), "daemon missed transactions");
-            }
-
-            let missed: HashSet<String> = res.missed_tx.into_iter().collect();
-            let mut json_iter = res.txs_as_json.into_iter();
-            let mut paired = Vec::with_capacity(chunk.len().saturating_sub(missed.len()));
-
-            for hash in chunk.into_iter() {
-                if missed.contains(&hash) {
-                    continue;
-                }
-                let json = json_iter
-                    .next()
-                    .ok_or_else(|| anyhow!("daemon returned fewer txs than expected"))?;
-                paired.push((hash, json));
-            }
-
-            if let Some(extra) = json_iter.next() {
-                warn!(
-                    extra_len = extra.len(),
-                    "daemon returned extra transaction payload",
-                );
-            }
-
-            Ok::<Vec<(String, String)>, anyhow::Error>(paired)
-        }
-    }));
-
-    let limit = concurrency.max(1);
-    stream
-        .buffer_unordered(limit)
-        .try_fold(Vec::new(), |mut acc, batch| async move {
-            acc.extend(batch);
-            Ok(acc)
-        })
+    let start_chunk = (concurrency.max(1) * 50).clamp(10, 300);
+    let tx_jsons = fetch_txs_adaptive(rpc.as_ref(), hashes, start_chunk, limiter.as_ref())
         .await
+        .with_context(|| "fetch transactions adaptive")?;
+
+    if tx_jsons.len() != hashes.len() {
+        return Err(anyhow!(
+            "daemon returned {} txs for {} hashes",
+            tx_jsons.len(),
+            hashes.len()
+        ));
+    }
+
+    Ok(hashes.iter().cloned().zip(tx_jsons.into_iter()).collect())
 }

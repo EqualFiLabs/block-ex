@@ -1,6 +1,7 @@
 pub mod checkpoint;
 pub mod cli;
 pub mod codec;
+pub mod fetch;
 pub mod limits;
 pub mod mempool;
 pub mod pipeline;
