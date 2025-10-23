@@ -197,7 +197,7 @@ pub struct GetBlockHeaderByHeightResult {
     pub status: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct BlockHeader {
     pub hash: String,
     pub height: u64,

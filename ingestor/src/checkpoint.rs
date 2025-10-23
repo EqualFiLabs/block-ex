@@ -1,6 +1,7 @@
 use anyhow::Result;
 use sqlx::{PgPool, Row};
 
+#[derive(Clone)]
 pub struct Checkpoint {
     pool: PgPool,
 }
