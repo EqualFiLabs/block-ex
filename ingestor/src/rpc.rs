@@ -1,6 +1,21 @@
 use anyhow::{anyhow, Context, Result};
+use async_trait::async_trait;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+
+#[async_trait]
+pub trait MoneroRpc: Send + Sync {
+    async fn get_block_header_by_height(&self, height: u64)
+        -> Result<GetBlockHeaderByHeightResult>;
+
+    async fn get_block(&self, hash: &str, fill_pow: bool) -> Result<GetBlockResult>;
+
+    async fn get_transactions(&self, txs_hashes: &[String]) -> Result<GetTransactionsResult>;
+
+    async fn get_block_count(&self) -> Result<GetBlockCountResult>;
+
+    async fn get_transaction_pool_hashes(&self) -> Result<Vec<String>>;
+}
 
 #[derive(Clone)]
 pub struct Rpc {
@@ -188,6 +203,32 @@ impl Rpc {
                 body.status
             ))
         }
+    }
+}
+
+#[async_trait]
+impl MoneroRpc for Rpc {
+    async fn get_block_header_by_height(
+        &self,
+        height: u64,
+    ) -> Result<GetBlockHeaderByHeightResult> {
+        Rpc::get_block_header_by_height(self, height).await
+    }
+
+    async fn get_block(&self, hash: &str, fill_pow: bool) -> Result<GetBlockResult> {
+        Rpc::get_block(self, hash, fill_pow).await
+    }
+
+    async fn get_transactions(&self, txs_hashes: &[String]) -> Result<GetTransactionsResult> {
+        Rpc::get_transactions(self, txs_hashes).await
+    }
+
+    async fn get_block_count(&self) -> Result<GetBlockCountResult> {
+        Rpc::get_block_count(self).await
+    }
+
+    async fn get_transaction_pool_hashes(&self) -> Result<Vec<String>> {
+        Rpc::get_transaction_pool_hashes(self).await
     }
 }
 

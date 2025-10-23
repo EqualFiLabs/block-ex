@@ -1899,11 +1899,13 @@ name = "ingestor"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "clap 4.5.50",
  "futures",
  "governor",
  "hex",
  "httpmock",
+ "rand 0.8.5",
  "reqwest",
  "serde",
  "serde_json",

@@ -8,12 +8,12 @@ use tracing::warn;
 
 use crate::{
     pipeline::{BlockMsg, Shutdown, TxMsg},
-    rpc::Rpc,
+    rpc::MoneroRpc,
 };
 
 #[derive(Clone)]
 pub struct Config {
-    pub rpc: Rpc,
+    pub rpc: Arc<dyn MoneroRpc>,
     pub limiter: Arc<DefaultDirectRateLimiter>,
     pub concurrency: usize,
 }
@@ -66,7 +66,7 @@ pub async fn run(
 }
 
 async fn fetch_transactions(
-    rpc: &Rpc,
+    rpc: &Arc<dyn MoneroRpc>,
     limiter: &Arc<DefaultDirectRateLimiter>,
     hashes: &[String],
     concurrency: usize,
@@ -80,10 +80,10 @@ async fn fetch_transactions(
         .map(|chunk| chunk.to_vec())
         .collect::<Vec<_>>();
 
-    let rpc_clone = rpc.clone();
+    let rpc_clone = Arc::clone(rpc);
     let limiter_clone = limiter.clone();
     let stream = stream::iter(chunked.into_iter().map(move |chunk| {
-        let rpc = rpc_clone.clone();
+        let rpc = Arc::clone(&rpc_clone);
         let limiter = limiter_clone.clone();
         async move {
             limiter.until_ready().await;

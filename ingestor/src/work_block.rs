@@ -9,26 +9,16 @@ use tracing::warn;
 use crate::{
     pipeline::{BlockMsg, SchedMsg, Shutdown},
     reorg::heal_reorg,
-    rpc::{BlockHeader, Rpc},
+    rpc::{BlockHeader, MoneroRpc},
     store::Store,
 };
 
+#[derive(Clone)]
 pub struct Config {
-    pub rpc: Rpc,
+    pub rpc: Arc<dyn MoneroRpc>,
     pub limiter: Arc<DefaultDirectRateLimiter>,
     pub store: Store,
     pub finality_window: u64,
-}
-
-impl Clone for Config {
-    fn clone(&self) -> Self {
-        Self {
-            rpc: self.rpc.clone(),
-            limiter: self.limiter.clone(),
-            store: self.store.clone(),
-            finality_window: self.finality_window,
-        }
-    }
 }
 
 pub async fn run(
@@ -80,7 +70,7 @@ impl std::error::Error for ReorgDetected {}
 
 async fn process_height(cfg: &Config, msg: &SchedMsg) -> Result<BlockMsg> {
     let height_u64 = u64::try_from(msg.height).context("height became negative")?;
-    let header = fetch_block_header(&cfg.rpc, &cfg.limiter, height_u64).await?;
+    let header = fetch_block_header(cfg.rpc.as_ref(), &cfg.limiter, height_u64).await?;
 
     let prev_hex = header.prev_hash.clone();
     let prev_bytes = <[u8; 32]>::from_hex(&prev_hex).unwrap_or([0u8; 32]);
@@ -96,12 +86,19 @@ async fn process_height(cfg: &Config, msg: &SchedMsg) -> Result<BlockMsg> {
                 "REORG DETECTED at height {}: header.prev != stored hash(h-1)", header.height
             );
             let finality_window = i64::try_from(cfg.finality_window).unwrap_or(i64::MAX);
-            heal_reorg(header.height as i64, &cfg.store, &cfg.rpc, finality_window).await?;
+            heal_reorg(
+                header.height as i64,
+                &cfg.store,
+                cfg.rpc.as_ref(),
+                finality_window,
+            )
+            .await?;
             return Err(ReorgDetected.into());
         }
     }
 
-    let (block_json, miner_tx_hash) = fetch_block_json(&cfg.rpc, &cfg.limiter, &header).await?;
+    let (block_json, miner_tx_hash) =
+        fetch_block_json(cfg.rpc.as_ref(), &cfg.limiter, &header).await?;
     let block_value: serde_json::Value =
         serde_json::from_str(&block_json).context("parse block json")?;
 
@@ -131,7 +128,7 @@ async fn process_height(cfg: &Config, msg: &SchedMsg) -> Result<BlockMsg> {
 }
 
 async fn fetch_block_header(
-    rpc: &Rpc,
+    rpc: &dyn MoneroRpc,
     limiter: &Arc<DefaultDirectRateLimiter>,
     height: u64,
 ) -> Result<BlockHeader> {
@@ -144,7 +141,7 @@ async fn fetch_block_header(
 }
 
 async fn fetch_block_json(
-    rpc: &Rpc,
+    rpc: &dyn MoneroRpc,
     limiter: &Arc<DefaultDirectRateLimiter>,
     header: &BlockHeader,
 ) -> Result<(String, Option<String>)> {

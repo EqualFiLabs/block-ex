@@ -8,7 +8,7 @@ use ingestor::{
     limits,
     mempool::MempoolWatcher,
     pipeline::{self, PipelineCfg},
-    rpc::Rpc,
+    rpc::{MoneroRpc, Rpc},
     store::Store,
     work_block, work_persist, work_sched, work_tx,
 };
@@ -45,9 +45,9 @@ async fn main() -> Result<()> {
         .await
         .context("failed to connect to postgres")?;
     let checkpoint = Arc::new(Checkpoint::new(store.pool().clone()));
-    let rpc = Rpc::new(&args.rpc_url);
+    let rpc: Arc<dyn MoneroRpc> = Arc::new(Rpc::new(&args.rpc_url));
 
-    MempoolWatcher::new(&args.zmq_url, rpc.clone(), store.clone()).spawn();
+    MempoolWatcher::new(&args.zmq_url, Arc::clone(&rpc), store.clone()).spawn();
 
     let start_height = match args.start_height {
         Some(start) => Some(i64::try_from(start).context("start height overflow")?),
@@ -64,7 +64,7 @@ async fn main() -> Result<()> {
 
     let sched_cfg = work_sched::Config {
         checkpoint: checkpoint.clone(),
-        rpc: rpc.clone(),
+        rpc: Arc::clone(&rpc),
         limiter: limiter.clone(),
         start_height,
         limit: args.limit,
@@ -75,7 +75,7 @@ async fn main() -> Result<()> {
 
     let rx_sched = Arc::new(Mutex::new(rx_sched));
     let block_cfg = work_block::Config {
-        rpc: rpc.clone(),
+        rpc: Arc::clone(&rpc),
         limiter: limiter.clone(),
         store: store.clone(),
         finality_window: args.finality_window,
@@ -93,7 +93,7 @@ async fn main() -> Result<()> {
 
     let rx_block = Arc::new(Mutex::new(rx_block));
     let tx_cfg = work_tx::Config {
-        rpc: rpc.clone(),
+        rpc: Arc::clone(&rpc),
         limiter: limiter.clone(),
         concurrency: conc,
     };

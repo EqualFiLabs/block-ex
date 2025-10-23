@@ -8,12 +8,12 @@ use tracing::{debug, info};
 use crate::{
     checkpoint::Checkpoint,
     pipeline::{SchedMsg, Shutdown},
-    rpc::Rpc,
+    rpc::MoneroRpc,
 };
 
 pub struct Config {
     pub checkpoint: Arc<Checkpoint>,
-    pub rpc: Rpc,
+    pub rpc: Arc<dyn MoneroRpc>,
     pub limiter: Arc<DefaultDirectRateLimiter>,
     pub start_height: Option<i64>,
     pub limit: Option<u64>,
@@ -46,7 +46,7 @@ pub async fn run(
 
         let height_u64 = u64::try_from(next_height).context("height became negative")?;
         let (tip_height_u64, finalized_height_i64) = loop {
-            let tip_height_u64 = fetch_chain_tip(&cfg.rpc, &cfg.limiter).await?;
+            let tip_height_u64 = fetch_chain_tip(cfg.rpc.as_ref(), &cfg.limiter).await?;
             if height_u64 <= tip_height_u64 {
                 let finalized_height_u64 = tip_height_u64.saturating_sub(cfg.finality_window);
                 let finalized_height_i64 =
@@ -88,7 +88,10 @@ pub async fn run(
     Ok(())
 }
 
-async fn fetch_chain_tip(rpc: &Rpc, limiter: &Arc<DefaultDirectRateLimiter>) -> Result<u64> {
+async fn fetch_chain_tip(
+    rpc: &dyn MoneroRpc,
+    limiter: &Arc<DefaultDirectRateLimiter>,
+) -> Result<u64> {
     limiter.until_ready().await;
     let res = rpc.get_block_count().await.context("get_block_count rpc")?;
     let highest = res.count.saturating_sub(1);
