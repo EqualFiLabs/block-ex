@@ -1,4 +1,6 @@
-use std::{collections::HashSet, convert::TryFrom, num::NonZeroU32, sync::Arc, time::Duration};
+use std::{
+    collections::HashSet, convert::TryFrom, env, num::NonZeroU32, sync::Arc, time::Duration,
+};
 
 use anyhow::{anyhow, Context, Result};
 use clap::Parser;
@@ -30,8 +32,26 @@ struct Args {
     rpc_url: String,
     #[arg(long, env = "FINALITY_WINDOW", default_value_t = 30)]
     finality_window: u64,
-    #[arg(long, env = "CONCURRENCY", default_value_t = 8)]
-    concurrency: usize,
+    #[arg(
+        long = "ingest-concurrency",
+        env = "INGEST_CONCURRENCY",
+        default_value_t = 8,
+        alias = "concurrency"
+    )]
+    ingest_concurrency: usize,
+    #[arg(
+        long = "rpc-requests-per-second",
+        env = "RPC_RPS",
+        default_value_t = 10
+    )]
+    rpc_rps: u32,
+    #[arg(
+        long,
+        env = "BOOTSTRAP",
+        default_value_t = false,
+        help = "Bootstrap mode relaxes limits & disables analytics, for fastest initial sync"
+    )]
+    bootstrap: bool,
     #[arg(long, env = "START_HEIGHT")]
     start_height: Option<u64>,
     #[arg(long, env = "LIMIT", help = "Optional limit of blocks to sync")]
@@ -55,7 +75,26 @@ async fn main() -> Result<()> {
         .with_target(false)
         .init();
 
+    if env::var("INGEST_CONCURRENCY").is_err() {
+        if let Ok(val) = env::var("CONCURRENCY") {
+            env::set_var("INGEST_CONCURRENCY", val);
+        }
+    }
+
     let args = Args::parse();
+
+    let eff_rps = if args.bootstrap {
+        (args.rpc_rps as f32 * 2.5).ceil() as u32
+    } else {
+        args.rpc_rps
+    };
+    let quota = Quota::per_second(NonZeroU32::new(eff_rps.max(1)).unwrap());
+    let limiter = Arc::new(RateLimiter::direct(quota));
+    let conc = if args.bootstrap {
+        (args.ingest_concurrency * 2).max(args.ingest_concurrency + 4)
+    } else {
+        args.ingest_concurrency
+    };
 
     info!("connecting to database");
     let store = Store::connect(&args.database_url)
@@ -74,10 +113,6 @@ async fn main() -> Result<()> {
     if next_height < 0 {
         next_height = 0;
     }
-
-    let limiter = Arc::new(RateLimiter::direct(Quota::per_second(
-        NonZeroU32::new(10).expect("non zero quota"),
-    )));
 
     let mut processed_blocks = 0u64;
 
@@ -128,8 +163,7 @@ async fn main() -> Result<()> {
         let block_value: Value = serde_json::from_str(&block_json).context("parse block json")?;
 
         let tx_hashes = extract_tx_hashes(&block_value);
-        let tx_json_pairs =
-            fetch_transactions(&rpc, &limiter, &tx_hashes, args.concurrency).await?;
+        let tx_json_pairs = fetch_transactions(&rpc, &limiter, &tx_hashes, conc).await?;
 
         let mut prepared_txs = Vec::with_capacity(tx_json_pairs.len() + 1);
 
