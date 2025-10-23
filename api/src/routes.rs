@@ -264,7 +264,10 @@ pub async fn search(State(st): State<AppState>, Query(Q { q }): Query<Q>) -> Res
         .flatten()
         .is_some()
         {
-            return crate::util::json_ok(serde_json::json!({"kind": "tx", "value": s}));
+            return crate::util::json_ok(models::SearchResult {
+                kind: "tx".to_owned(),
+                value: serde_json::Value::String(s.to_owned()),
+            });
         }
         if sqlx::query_scalar!(
             "SELECT 1 FROM public.blocks WHERE hash = decode($1,'hex') LIMIT 1",
@@ -276,7 +279,10 @@ pub async fn search(State(st): State<AppState>, Query(Q { q }): Query<Q>) -> Res
         .flatten()
         .is_some()
         {
-            return crate::util::json_ok(serde_json::json!({"kind": "block", "value": s}));
+            return crate::util::json_ok(models::SearchResult {
+                kind: "block".to_owned(),
+                value: serde_json::Value::String(s.to_owned()),
+            });
         }
         if sqlx::query_scalar!(
             "SELECT 1 FROM public.tx_inputs WHERE key_image = decode($1,'hex') LIMIT 1",
@@ -288,7 +294,10 @@ pub async fn search(State(st): State<AppState>, Query(Q { q }): Query<Q>) -> Res
         .flatten()
         .is_some()
         {
-            return crate::util::json_ok(serde_json::json!({"kind": "key_image", "value": s}));
+            return crate::util::json_ok(models::SearchResult {
+                kind: "key_image".to_owned(),
+                value: serde_json::Value::String(s.to_owned()),
+            });
         }
     }
     if let Ok(h) = s.parse::<i64>() {
@@ -299,7 +308,10 @@ pub async fn search(State(st): State<AppState>, Query(Q { q }): Query<Q>) -> Res
             .flatten()
             .is_some()
         {
-            return crate::util::json_ok(serde_json::json!({"kind": "height", "value": h}));
+            return crate::util::json_ok(models::SearchResult {
+                kind: "height".to_owned(),
+                value: serde_json::json!(h),
+            });
         }
         if sqlx::query_scalar!(
             "SELECT 1 FROM public.outputs WHERE global_index=$1 LIMIT 1",
@@ -311,7 +323,10 @@ pub async fn search(State(st): State<AppState>, Query(Q { q }): Query<Q>) -> Res
         .flatten()
         .is_some()
         {
-            return crate::util::json_ok(serde_json::json!({"kind": "global_index", "value": h}));
+            return crate::util::json_ok(models::SearchResult {
+                kind: "global_index".to_owned(),
+                value: serde_json::json!(h),
+            });
         }
     }
     crate::util::json_err(404, "no match")

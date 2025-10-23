@@ -345,6 +345,7 @@ mod tests {
     use anyhow::Result;
     use sqlx::{migrate::Migrator, PgPool};
 
+    // Embed workspace migrations so tests stay aligned with the live schema.
     static MIGRATOR: Migrator = sqlx::migrate!("../db/migrations");
 
     async fn setup_pool() -> Result<Option<PgPool>> {
