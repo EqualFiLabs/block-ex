@@ -1,9 +1,4 @@
-use std::{
-    net::SocketAddr,
-    process,
-    str::FromStr,
-    time::Duration,
-};
+use std::{net::SocketAddr, process, str::FromStr, time::Duration};
 
 use axum::{routing::get, Router};
 use clap::{Parser, Subcommand};

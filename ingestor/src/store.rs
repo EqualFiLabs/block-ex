@@ -1,0 +1,153 @@
+use anyhow::Result;
+use sqlx::{postgres::PgQueryResult, PgPool, Postgres, Transaction};
+
+#[derive(Clone)]
+pub struct Store {
+    pool: PgPool,
+}
+
+impl Store {
+    pub async fn connect(db_url: &str) -> Result<Self> {
+        let pool = PgPool::connect(db_url).await?;
+        Ok(Self { pool })
+    }
+
+    pub fn pool(&self) -> &PgPool {
+        &self.pool
+    }
+
+    pub async fn begin_block(&self) -> Result<Transaction<'_, Postgres>> {
+        Ok(self.pool.begin().await?)
+    }
+
+    pub async fn insert_block(
+        tx: &mut Transaction<'_, Postgres>,
+        height: i64,
+        hash: &[u8],
+        prev_hash: &[u8],
+        ts: i64,
+        size_bytes: i32,
+        major: i32,
+        minor: i32,
+        nonce: i64,
+        tx_count: i32,
+        reward_nanos: i64,
+    ) -> Result<PgQueryResult> {
+        sqlx::query(
+            r#"
+INSERT INTO public.blocks (height, hash, prev_hash, block_timestamp, size_bytes, major_version, minor_version, nonce, tx_count, reward_nanos)
+VALUES ($1, $2, $3, to_timestamp($4), $5, $6, $7, $8, $9, $10)
+ON CONFLICT (height) DO NOTHING
+"#,
+        )
+        .bind(height)
+        .bind(hash)
+        .bind(prev_hash)
+        .bind(ts)
+        .bind(size_bytes)
+        .bind(major)
+        .bind(minor)
+        .bind(nonce)
+        .bind(tx_count)
+        .bind(reward_nanos)
+        .execute(&mut **tx)
+        .await
+        .map_err(Into::into)
+    }
+
+    pub async fn insert_tx(
+        tx: &mut Transaction<'_, Postgres>,
+        tx_hash: &[u8],
+        block_height: Option<i64>,
+        block_ts: Option<i64>,
+        in_mempool: bool,
+        fee_nanos: Option<i64>,
+        size_bytes: i32,
+        version: i32,
+        unlock_time: i64,
+        extra: &serde_json::Value,
+        rct_type: i32,
+        proof_type: Option<&str>,
+        bp_plus: bool,
+        num_inputs: i32,
+        num_outputs: i32,
+    ) -> Result<PgQueryResult> {
+        sqlx::query(
+            r#"
+INSERT INTO public.txs
+(tx_hash, block_height, block_timestamp, in_mempool, fee_nanos, size_bytes, version, unlock_time, extra, rct_type, proof_type, bp_plus, num_inputs, num_outputs)
+VALUES ($1, $2, CASE WHEN $3 IS NULL THEN NULL ELSE to_timestamp($3) END, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+ON CONFLICT (tx_hash) DO NOTHING
+"#,
+        )
+        .bind(tx_hash)
+        .bind(block_height)
+        .bind(block_ts)
+        .bind(in_mempool)
+        .bind(fee_nanos)
+        .bind(size_bytes)
+        .bind(version)
+        .bind(unlock_time)
+        .bind(extra)
+        .bind(rct_type)
+        .bind(proof_type)
+        .bind(bp_plus)
+        .bind(num_inputs)
+        .bind(num_outputs)
+        .execute(&mut **tx)
+        .await
+        .map_err(Into::into)
+    }
+
+    pub async fn insert_input(
+        tx: &mut Transaction<'_, Postgres>,
+        tx_hash: &[u8],
+        idx: i32,
+        key_image: &[u8],
+        ring_size: i32,
+        pseudo_out: Option<&[u8]>,
+    ) -> Result<PgQueryResult> {
+        sqlx::query(
+            r#"
+INSERT INTO public.tx_inputs (tx_hash, idx, key_image, ring_size, pseudo_out)
+VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT (tx_hash, idx) DO NOTHING
+"#,
+        )
+        .bind(tx_hash)
+        .bind(idx)
+        .bind(key_image)
+        .bind(ring_size)
+        .bind(pseudo_out)
+        .execute(&mut **tx)
+        .await
+        .map_err(Into::into)
+    }
+
+    pub async fn insert_output(
+        tx: &mut Transaction<'_, Postgres>,
+        tx_hash: &[u8],
+        idx_in_tx: i32,
+        commitment: &[u8],
+        amount: Option<i64>,
+        stealth_pub: &[u8],
+        global_index: Option<i64>,
+    ) -> Result<PgQueryResult> {
+        sqlx::query(
+            r#"
+INSERT INTO public.outputs (tx_hash, idx_in_tx, commitment, amount, stealth_public_key, global_index)
+VALUES ($1, $2, $3, $4, $5, $6)
+ON CONFLICT (tx_hash, idx_in_tx) DO NOTHING
+"#,
+        )
+        .bind(tx_hash)
+        .bind(idx_in_tx)
+        .bind(commitment)
+        .bind(amount)
+        .bind(stealth_pub)
+        .bind(global_index)
+        .execute(&mut **tx)
+        .await
+        .map_err(Into::into)
+    }
+}
