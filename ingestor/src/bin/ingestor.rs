@@ -9,6 +9,7 @@ use governor::{DefaultDirectRateLimiter, Quota, RateLimiter};
 use hex::FromHex;
 use ingestor::{
     checkpoint::Checkpoint,
+    cli::Args,
     codec::{analyze_tx, parse_tx_json},
     mempool::MempoolWatcher,
     reorg::heal_reorg,
@@ -19,51 +20,6 @@ use serde_json::Value;
 use tokio::time::sleep;
 use tracing::{debug, info, warn};
 use tracing_subscriber::EnvFilter;
-
-#[derive(Parser, Debug)]
-struct Args {
-    #[arg(long, env = "DATABASE_URL")]
-    database_url: String,
-    #[arg(
-        long,
-        env = "XMR_RPC_URL",
-        default_value = "http://127.0.0.1:38081/json_rpc"
-    )]
-    rpc_url: String,
-    #[arg(long, env = "FINALITY_WINDOW", default_value_t = 30)]
-    finality_window: u64,
-    #[arg(
-        long = "ingest-concurrency",
-        env = "INGEST_CONCURRENCY",
-        default_value_t = 8,
-        alias = "concurrency"
-    )]
-    ingest_concurrency: usize,
-    #[arg(
-        long = "rpc-requests-per-second",
-        env = "RPC_RPS",
-        default_value_t = 10
-    )]
-    rpc_rps: u32,
-    #[arg(
-        long,
-        env = "BOOTSTRAP",
-        default_value_t = false,
-        help = "Bootstrap mode relaxes limits & disables analytics, for fastest initial sync"
-    )]
-    bootstrap: bool,
-    #[arg(long, env = "START_HEIGHT")]
-    start_height: Option<u64>,
-    #[arg(long, env = "LIMIT", help = "Optional limit of blocks to sync")]
-    limit: Option<u64>,
-    #[arg(
-        long,
-        env = "XMR_ZMQ_URL",
-        default_value = "tcp://127.0.0.1:38082",
-        help = "Monero ZMQ publisher providing raw_tx/raw_block topics"
-    )]
-    zmq_url: String,
-}
 
 #[tokio::main]
 async fn main() -> Result<()> {

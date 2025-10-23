@@ -3,6 +3,10 @@ name = "ingestor"
 version = "0.1.0"
 edition = "2021"
 
+[[bin]]
+name = "ingestor_bin"
+path = "src/bin/ingestor.rs"
+
 [dependencies]
 anyhow = "1.0"
 clap = { version = "4.5.20", features = ["derive", "env"] }
