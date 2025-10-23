@@ -1,0 +1,16 @@
+---
+source: api/tests/blocks_endpoints.rs
+assertion_line: 197
+expression: detail_normalized
+---
+{
+  "hash": "ac16709883f23083c2f0759960f85ba7a0c2edbb020b800996e032955ec323ff",
+  "height": 1,
+  "height_offset": 0,
+  "major_version": 1,
+  "minor_version": 16,
+  "reward_nanos": 17592169267200,
+  "size_bytes": 273,
+  "ts": 1761169471,
+  "tx_count": 1
+}

@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\nINSERT INTO public.soft_facts\n(block_height, block_timestamp, total_fee, avg_ring_size, median_fee_rate, bp_total_bytes, clsag_count)\nSELECT b.height, b.block_timestamp, $2, ($3)::double precision, ($4)::double precision, $5, $6 FROM public.blocks b WHERE b.height = $1\nON CONFLICT (block_height) DO UPDATE\n  SET total_fee=$2, avg_ring_size=($3)::double precision, median_fee_rate=($4)::double precision, bp_total_bytes=$5, clsag_count=$6\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Float8",
+        "Float8",
+        "Int8",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4cd1de9ceec44650ea28477611047372ad8d42d2a7c0634264b9a5098e50ab44"
+}

@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM public.chain_tips WHERE height >= $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "60379a47faa0af7674e992c1989d9d5f9670b7512ed256ac3a633f43ca27ba0d"
+}

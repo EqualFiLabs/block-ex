@@ -1,7 +1,8 @@
 use axum::{
     extract::{Path, Query, State},
+    response::Response,
     routing::get,
-    Response, Router,
+    Router,
 };
 use serde::Deserialize;
 
@@ -36,50 +37,54 @@ pub struct Page {
 }
 
 pub async fn list_blocks(State(st): State<AppState>, Query(p): Query<Page>) -> Response {
-    let start = p.start.unwrap_or_else(|| 0);
     let limit = p.limit.unwrap_or(20).clamp(1, 200);
 
-    let rows = if start == 0 {
-        sqlx::query_as!(
-            models::BlockView,
-            r#"
-SELECT height, encode(hash,'hex') AS hash, extract(epoch from block_timestamp)::bigint AS ts,
-       size_bytes, major_version, minor_version, tx_count, reward_nanos
-FROM public.blocks
-ORDER BY height DESC
-LIMIT $1
-"#,
-            limit
-        )
-        .fetch_all(&st.db)
-        .await
-    } else {
-        sqlx::query_as!(
-            models::BlockView,
-            r#"
-SELECT height, encode(hash,'hex') AS hash, extract(epoch from block_timestamp)::bigint AS ts,
-       size_bytes, major_version, minor_version, tx_count, reward_nanos
-FROM public.blocks
-WHERE height >= $1
-ORDER BY height ASC
-LIMIT $2
-"#,
-            start,
-            limit
-        )
-        .fetch_all(&st.db)
-        .await
+    let start_height = match p.start {
+        Some(s) if s >= 0 => s,
+        Some(_) => return crate::util::json_ok(Vec::<models::BlockView>::new()),
+        None => match sqlx::query_scalar!("SELECT MAX(height) FROM public.blocks")
+            .fetch_one(&st.db)
+            .await
+        {
+            Ok(Some(h)) => h,
+            Ok(None) => return crate::util::json_ok(Vec::<models::BlockView>::new()),
+            Err(e) => return crate::util::json_err(500, &format!("db error: {e}")),
+        },
     };
 
+    let cache_key = format!("blocks:{start_height}:{limit}");
+    if let Some(resp) = crate::util::cached_response(&st.cache, &cache_key).await {
+        return resp;
+    }
+
+    let rows = sqlx::query_as!(
+        models::BlockView,
+        r#"
+SELECT height, encode(hash,'hex') AS hash, extract(epoch from block_timestamp)::bigint AS ts,
+       size_bytes, major_version, minor_version, tx_count, reward_nanos
+FROM public.blocks
+WHERE height <= $1
+ORDER BY height DESC
+LIMIT $2
+"#,
+        start_height,
+        limit
+    )
+    .fetch_all(&st.db)
+    .await;
+
     match rows {
-        Ok(v) => {
-            crate::util::cached_json(&st.cache, &format!("blocks:{start}:{limit}"), &v, 3).await
-        }
+        Ok(v) => crate::util::cached_json(&st.cache, &cache_key, &v, 3).await,
         Err(e) => crate::util::json_err(500, &format!("db error: {e}")),
     }
 }
 
 pub async fn get_block(State(st): State<AppState>, Path(id): Path<String>) -> Response {
+    let cache_key = format!("block:{id}");
+    if let Some(resp) = crate::util::cached_response(&st.cache, &cache_key).await {
+        return resp;
+    }
+
     let is_hex = id.len() == 64 && id.chars().all(|c| c.is_ascii_hexdigit());
     let row = if is_hex {
         sqlx::query_as!(
@@ -109,13 +114,18 @@ FROM public.blocks WHERE height = $1
     };
 
     match row {
-        Ok(Some(v)) => crate::util::cached_json(&st.cache, &format!("block:{id}"), &v, 30).await,
+        Ok(Some(v)) => crate::util::cached_json(&st.cache, &cache_key, &v, 30).await,
         Ok(None) => crate::util::json_err(404, "not found"),
         Err(e) => crate::util::json_err(500, &format!("db error: {e}")),
     }
 }
 
 pub async fn get_tx(State(st): State<AppState>, Path(hash): Path<String>) -> Response {
+    let cache_key = format!("tx:{hash}");
+    if let Some(resp) = crate::util::cached_response(&st.cache, &cache_key).await {
+        return resp;
+    }
+
     let row = sqlx::query_as!(
         models::TxView,
         r#"
@@ -142,13 +152,18 @@ FROM public.txs WHERE tx_hash = decode($1,'hex')
     .await;
 
     match row {
-        Ok(Some(v)) => crate::util::cached_json(&st.cache, &format!("tx:{hash}"), &v, 60).await,
+        Ok(Some(v)) => crate::util::cached_json(&st.cache, &cache_key, &v, 60).await,
         Ok(None) => crate::util::json_err(404, "not found"),
         Err(e) => crate::util::json_err(500, &format!("db error: {e}")),
     }
 }
 
 pub async fn get_mempool(State(st): State<AppState>) -> Response {
+    let cache_key = "mempool:latest";
+    if let Some(resp) = crate::util::cached_response(&st.cache, cache_key).await {
+        return resp;
+    }
+
     let rows = sqlx::query_as!(
         models::MempoolView,
         r#"
@@ -165,12 +180,17 @@ LIMIT 1000
     .await;
 
     match rows {
-        Ok(v) => crate::util::cached_json(&st.cache, "mempool:latest", &v, 2).await,
+        Ok(v) => crate::util::cached_json(&st.cache, cache_key, &v, 2).await,
         Err(e) => crate::util::json_err(500, &format!("db error: {e}")),
     }
 }
 
 pub async fn get_tx_rings(State(st): State<AppState>, Path(hash): Path<String>) -> Response {
+    let cache_key = format!("rings:{hash}");
+    if let Some(resp) = crate::util::cached_response(&st.cache, &cache_key).await {
+        return resp;
+    }
+
     let rows = sqlx::query_as!(
         models::RingView,
         r#"
@@ -190,23 +210,28 @@ ORDER BY r.input_idx ASC, r.ring_index ASC
     .await;
 
     match rows {
-        Ok(v) => crate::util::cached_json(&st.cache, &format!("rings:{hash}"), &v, 60).await,
+        Ok(v) => crate::util::cached_json(&st.cache, &cache_key, &v, 60).await,
         Err(e) => crate::util::json_err(500, &format!("db error: {e}")),
     }
 }
 
 pub async fn get_key_image(State(st): State<AppState>, Path(hex): Path<String>) -> Response {
+    let cache_key = format!("ki:{hex}");
+    if let Some(resp) = crate::util::cached_response(&st.cache, &cache_key).await {
+        return resp;
+    }
+
     let row = sqlx::query_as!(
         models::KeyImageView,
         r#"
 SELECT
-  encode(key_image,'hex') AS key_image,
-  encode(tx_hash,'hex') AS spending_tx,
-  block_height
-FROM public.tx_inputs
-JOIN public.txs ON txs.tx_hash = tx_inputs.tx_hash
-WHERE key_image = decode($1,'hex')
-ORDER BY block_height DESC NULLS LAST
+  encode(ti.key_image,'hex') AS key_image,
+  encode(t.tx_hash,'hex') AS spending_tx,
+  t.block_height
+FROM public.tx_inputs ti
+JOIN public.txs t ON t.tx_hash = ti.tx_hash
+WHERE ti.key_image = decode($1,'hex')
+ORDER BY t.block_height DESC NULLS LAST
 LIMIT 1
 "#,
         hex
@@ -215,7 +240,7 @@ LIMIT 1
     .await;
 
     match row {
-        Ok(Some(v)) => crate::util::cached_json(&st.cache, &format!("ki:{hex}"), &v, 120).await,
+        Ok(Some(v)) => crate::util::cached_json(&st.cache, &cache_key, &v, 120).await,
         Ok(None) => crate::util::json_err(404, "not found"),
         Err(e) => crate::util::json_err(500, &format!("db error: {e}")),
     }

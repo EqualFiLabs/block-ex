@@ -1,0 +1,44 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\nSELECT encode(tx_hash,'hex') AS hash,\n       extract(epoch from first_seen)::bigint AS first_seen,\n       extract(epoch from last_seen)::bigint AS last_seen,\n       fee_rate, relayed_by\nFROM public.mempool_txs\nORDER BY last_seen DESC\nLIMIT 1000\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "first_seen",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "last_seen",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "fee_rate",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 4,
+        "name": "relayed_by",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      true,
+      true
+    ]
+  },
+  "hash": "55004196db36de9abb925fed03d165804f2764986f2db887a501f63dd9009628"
+}

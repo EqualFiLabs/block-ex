@@ -5,9 +5,13 @@
   "scripts": {
     "node:version": "node -v",
     "npm:version": "npm -v",
-    "fmt": "echo \"Use cargo fmt && cargo clippy in Rust workspaces\" && exit 0"
+    "fmt": "echo \"Use cargo fmt && cargo clippy in Rust workspaces\" && exit 0",
+    "openapi:ts": "npx openapi-typescript api/openapi.yaml -o api/types.gen.ts"
   },
   "engines": {
     "node": ">=20.18.0 <21"
+  },
+  "devDependencies": {
+    "openapi-typescript": "7.5.1"
   }
 }

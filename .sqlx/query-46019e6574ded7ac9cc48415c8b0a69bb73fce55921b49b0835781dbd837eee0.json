@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\nSELECT height FROM public.blocks\nWHERE height BETWEEN $1 AND $2\nORDER BY height ASC\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "height",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "46019e6574ded7ac9cc48415c8b0a69bb73fce55921b49b0835781dbd837eee0"
+}

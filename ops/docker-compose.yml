@@ -75,7 +75,7 @@ services:
       REDIS_URL: "redis://redis:6379"
     ports:
       - "8081:8081"
-    command: ["serve", "--bind", "0.0.0.0:8081"]
+    command: ["--bind", "0.0.0.0:8081"]
     healthcheck:
       test: ["CMD", "/app/api", "probe", "--url", "http://localhost:8081/healthz"]
       interval: 10s
@@ -98,7 +98,6 @@ services:
       DATABASE_URL: "postgres://explorer:explorer@postgres:5432/explorer"
       XMR_RPC_URL: "http://monerod:38081/json_rpc"
       XMR_ZMQ_URL: "tcp://monerod:38082"
-    command: ["run"]
     restart: unless-stopped
 
   web:

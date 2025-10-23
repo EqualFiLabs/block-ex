@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO public.chain_tips (height, hash, prev_hash) VALUES ($1,$2,$3)\n               ON CONFLICT (height) DO UPDATE SET hash = EXCLUDED.hash, prev_hash = EXCLUDED.prev_hash",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Bytea",
+        "Bytea"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "6523570e707361025b90f70eb24b4bcea5b93ecdd479134fe328ad050bdf11c8"
+}

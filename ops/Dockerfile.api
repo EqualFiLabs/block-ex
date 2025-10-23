@@ -15,4 +15,4 @@ WORKDIR /app
 COPY --from=builder /app/target/release/api /app/api
 USER nonroot:nonroot
 ENTRYPOINT ["/app/api"]
-CMD ["--help"]
+CMD []

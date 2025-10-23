@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM public.mempool_txs",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "3c8b4d4731ce7e5d7f6a2dec9a36e2759568033e3c66647b6a45c2d79ac33b7b"
+}
