@@ -1,0 +1,21 @@
+[workspace]
+members = [
+  "api",
+  "ingestor"
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+panic = "deny"
+unwrap_used = "deny"
+expect_used = "deny"
+
+[workspace.dependencies]
+sqlx = { version = "0.7.4", features = ["runtime-tokio-rustls", "postgres", "macros", "uuid", "time", "migrate"] }
+tokio = { version = "1.39", features = ["macros", "rt-multi-thread"] }
