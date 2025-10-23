@@ -37,7 +37,7 @@ impl Store {
             r#"
 INSERT INTO public.blocks (height, hash, prev_hash, block_timestamp, size_bytes, major_version, minor_version, nonce, tx_count, reward_nanos)
 VALUES ($1, $2, $3, to_timestamp($4), $5, $6, $7, $8, $9, $10)
-ON CONFLICT (height) DO NOTHING
+ON CONFLICT DO NOTHING
 "#,
         )
         .bind(height)
@@ -77,7 +77,7 @@ ON CONFLICT (height) DO NOTHING
 INSERT INTO public.txs
 (tx_hash, block_height, block_timestamp, in_mempool, fee_nanos, size_bytes, version, unlock_time, extra, rct_type, proof_type, bp_plus, num_inputs, num_outputs)
 VALUES ($1, $2, CASE WHEN $3 IS NULL THEN NULL ELSE to_timestamp($3) END, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
-ON CONFLICT (tx_hash) DO NOTHING
+ON CONFLICT DO NOTHING
 "#,
         )
         .bind(tx_hash)
@@ -216,9 +216,9 @@ FROM aggs
             r#"
 INSERT INTO public.soft_facts
 (block_height, block_timestamp, total_fee, avg_ring_size, median_fee_rate, bp_total_bytes, clsag_count)
-SELECT b.height, b.block_timestamp, $2, $3, $4, $5, $6 FROM public.blocks b WHERE b.height = $1
+SELECT b.height, b.block_timestamp, $2, ($3)::double precision, ($4)::double precision, $5, $6 FROM public.blocks b WHERE b.height = $1
 ON CONFLICT (block_height) DO UPDATE
-  SET total_fee=$2, avg_ring_size=$3, median_fee_rate=$4, bp_total_bytes=$5, clsag_count=$6
+  SET total_fee=$2, avg_ring_size=($3)::double precision, median_fee_rate=($4)::double precision, bp_total_bytes=$5, clsag_count=$6
 "#,
             height,
             rec.total_fee,
@@ -228,6 +228,58 @@ ON CONFLICT (block_height) DO UPDATE
             clsag_count
         )
         .execute(&mut **tx)
+        .await?;
+
+        Ok(())
+    }
+
+    pub async fn update_block_confirmations_tx(
+        tx: &mut Transaction<'_, Postgres>,
+        height: i64,
+        confirmations: i32,
+        is_final: bool,
+    ) -> Result<()> {
+        sqlx::query!(
+            "UPDATE public.blocks SET confirmations = $2, is_final = $3 WHERE height = $1",
+            height,
+            confirmations,
+            is_final
+        )
+        .execute(&mut **tx)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn refresh_confirmations(
+        &self,
+        start_height: i64,
+        tip_height: i64,
+        finalized_height: i64,
+    ) -> Result<()> {
+        let start = start_height.min(tip_height).max(0);
+        sqlx::query!(
+            r#"
+WITH params AS (
+  SELECT $1::bigint AS start_h, $2::bigint AS tip_h, $3::bigint AS finalized_h
+)
+UPDATE public.blocks AS b
+SET confirmations = GREATEST(params.tip_h - b.height + 1, 0),
+    is_final = b.height <= params.finalized_h
+FROM params
+WHERE b.height BETWEEN params.start_h AND params.tip_h
+"#,
+            start,
+            tip_height,
+            finalized_height
+        )
+        .execute(self.pool())
+        .await?;
+
+        sqlx::query!(
+            "UPDATE public.blocks SET is_final = true WHERE height <= $1 AND is_final = false",
+            finalized_height
+        )
+        .execute(self.pool())
         .await?;
 
         Ok(())

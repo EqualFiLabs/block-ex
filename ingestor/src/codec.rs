@@ -1,11 +1,12 @@
 use anyhow::Result;
-use serde::Deserialize;
+use serde::{de::Error as DeError, Deserialize, Deserializer};
 
 #[derive(Debug, Deserialize)]
 pub struct TxJson {
     pub version: u64,
     pub vin: Vec<serde_json::Value>,
     pub vout: Vec<serde_json::Value>,
+    #[serde(deserialize_with = "extra_as_hex")]
     pub extra: String,
     #[serde(default)]
     pub rct_signatures: serde_json::Value,
@@ -32,6 +33,32 @@ pub enum TxExtraTag {
     Nonce(Vec<u8>),
     AdditionalPubKeys(usize),
     Unknown(u8, usize),
+}
+
+fn extra_as_hex<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    match value {
+        serde_json::Value::String(s) => Ok(s),
+        serde_json::Value::Array(arr) => {
+            let mut bytes = Vec::with_capacity(arr.len());
+            for v in arr {
+                let b = v
+                    .as_u64()
+                    .ok_or_else(|| D::Error::custom("extra array contains non-integer"))?;
+                if b > u8::MAX as u64 {
+                    return Err(D::Error::custom("extra array byte out of range"));
+                }
+                bytes.push(b as u8);
+            }
+            Ok(hex::encode(bytes))
+        }
+        other => Err(D::Error::custom(format!(
+            "unexpected extra format: {other:?}"
+        ))),
+    }
 }
 
 pub fn parse_tx_json(json_str: &str) -> Result<TxJson> {
