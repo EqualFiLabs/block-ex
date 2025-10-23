@@ -1,17 +1,26 @@
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone)]
 pub struct Rpc {
-    base: String,
+    base_json: String,
+    base_rest: String,
     http: Client,
 }
 
 impl Rpc {
     pub fn new<S: Into<String>>(base: S) -> Self {
+        let base_json = base.into();
+        let base_rest = base_json
+            .strip_suffix("/json_rpc")
+            .unwrap_or(&base_json)
+            .trim_end_matches('/')
+            .to_string();
+
         Self {
-            base: base.into(),
+            base_json,
+            base_rest,
             http: Client::builder().build().expect("reqwest client"),
         }
     }
@@ -30,8 +39,16 @@ impl Rpc {
         }
 
         #[derive(Deserialize)]
-        struct Res<T> {
-            result: T,
+        struct RpcError {
+            code: i64,
+            message: String,
+        }
+
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum RpcResponse<T> {
+            Ok { result: T },
+            Err { error: RpcError },
         }
 
         let body = Req {
@@ -43,7 +60,7 @@ impl Rpc {
 
         let res = self
             .http
-            .post(&self.base)
+            .post(&self.base_json)
             .json(&body)
             .send()
             .await
@@ -59,9 +76,17 @@ impl Rpc {
             anyhow::bail!("RPC {} HTTP {}: {}", method, status, v);
         }
 
-        let result: Res<T> =
-            serde_json::from_value(v).with_context(|| "RPC result decode failed")?;
-        Ok(result.result)
+        match serde_json::from_value::<RpcResponse<T>>(v)
+            .with_context(|| "RPC result decode failed")?
+        {
+            RpcResponse::Ok { result } => Ok(result),
+            RpcResponse::Err { error } => Err(anyhow!(
+                "RPC {} error {}: {}",
+                method,
+                error.code,
+                error.message
+            )),
+        }
     }
 
     pub async fn get_block_header_by_height(
@@ -108,6 +133,46 @@ impl Rpc {
     pub async fn get_block_count(&self) -> Result<GetBlockCountResult> {
         self.call("get_block_count", ()).await
     }
+
+    pub async fn get_transaction_pool_hashes(&self) -> Result<Vec<String>> {
+        #[derive(Deserialize)]
+        struct RestResponse {
+            status: String,
+            #[serde(default)]
+            tx_hashes: Vec<String>,
+        }
+
+        let url = format!("{}/get_transaction_pool_hashes", self.base_rest);
+        let res = self
+            .http
+            .get(&url)
+            .send()
+            .await
+            .with_context(|| "get_transaction_pool_hashes send failed".to_string())?;
+
+        let status = res.status();
+        let body = res
+            .json::<RestResponse>()
+            .await
+            .with_context(|| "get_transaction_pool_hashes decode failed".to_string())?;
+
+        if !status.is_success() {
+            anyhow::bail!(
+                "get_transaction_pool_hashes HTTP {} status {}",
+                status,
+                body.status
+            );
+        }
+
+        if body.status == "OK" {
+            Ok(body.tx_hashes)
+        } else {
+            Err(anyhow!(
+                "get_transaction_pool_hashes status {}",
+                body.status
+            ))
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -126,6 +191,7 @@ pub struct BlockHeader {
     pub minor_version: u32,
     pub nonce: u64,
     pub reward: u64,
+    #[serde(default, alias = "block_size")]
     pub size: u64,
 }
 
@@ -136,6 +202,8 @@ pub struct GetBlockResult {
     pub json: Option<String>,
     #[serde(default)]
     pub blob: Option<String>,
+    #[serde(default)]
+    pub miner_tx_hash: Option<String>,
     pub status: String,
 }
 
@@ -152,4 +220,52 @@ pub struct GetTransactionsResult {
 pub struct GetBlockCountResult {
     pub count: u64,
     pub status: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use httpmock::prelude::*;
+    use serde_json::json;
+
+    #[tokio::test]
+    async fn transaction_pool_hashes_success() {
+        let server = MockServer::start();
+        let mock = server.mock(|when, then| {
+            when.method(GET).path("/get_transaction_pool_hashes");
+            then.status(200).json_body(json!({
+                "status": "OK",
+                "tx_hashes": ["abcdef"],
+            }));
+        });
+
+        let rpc = Rpc::new(format!("{}/json_rpc", server.url("")));
+        let hashes = rpc
+            .get_transaction_pool_hashes()
+            .await
+            .expect("pool hashes success");
+
+        assert_eq!(hashes, vec!["abcdef".to_string()]);
+        mock.assert();
+    }
+
+    #[tokio::test]
+    async fn transaction_pool_hashes_non_ok_status() {
+        let server = MockServer::start();
+        let mock = server.mock(|when, then| {
+            when.method(GET).path("/get_transaction_pool_hashes");
+            then.status(200).json_body(json!({
+                "status": "BUSY",
+                "tx_hashes": ["abcdef"],
+            }));
+        });
+
+        let rpc = Rpc::new(format!("{}/json_rpc", server.url("")));
+        let err = rpc.get_transaction_pool_hashes().await.unwrap_err();
+
+        assert!(err
+            .to_string()
+            .contains("get_transaction_pool_hashes status BUSY"));
+        mock.assert();
+    }
 }

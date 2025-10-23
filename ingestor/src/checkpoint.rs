@@ -5,26 +5,47 @@ pub struct Checkpoint {
     pool: PgPool,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct CheckpointState {
+    pub ingested_height: i64,
+    pub finalized_height: i64,
+}
+
 impl Checkpoint {
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
     }
 
-    pub async fn get(&self) -> Result<i64> {
-        let rec = sqlx::query("SELECT last_height FROM ingestor_checkpoint WHERE id=$1")
-            .bind(1i32)
-            .fetch_optional(&self.pool)
-            .await?;
+    pub async fn get_state(&self) -> Result<CheckpointState> {
+        let rec = sqlx::query(
+            "SELECT last_height, finalized_height FROM ingestor_checkpoint WHERE id=$1",
+        )
+        .bind(1i32)
+        .fetch_optional(&self.pool)
+        .await?;
 
-        let height = rec
+        let ingested_height = rec
+            .as_ref()
             .map(|row| row.try_get::<i64, _>("last_height"))
             .transpose()?
             .unwrap_or(0);
 
-        Ok(height)
+        let finalized_height = rec
+            .map(|row| row.try_get::<i64, _>("finalized_height"))
+            .transpose()?
+            .unwrap_or(0);
+
+        Ok(CheckpointState {
+            ingested_height,
+            finalized_height,
+        })
     }
 
-    pub async fn set(&self, h: i64) -> Result<()> {
+    pub async fn get(&self) -> Result<i64> {
+        Ok(self.get_state().await?.ingested_height)
+    }
+
+    pub async fn set(&self, ingested_height: i64, finalized_height: i64) -> Result<()> {
         sqlx::query(
             r#"
 INSERT INTO ingestor_checkpoint (id, last_height, updated_at)
@@ -34,7 +55,19 @@ DO UPDATE SET last_height = EXCLUDED.last_height,
               updated_at = NOW()
 "#,
         )
-        .bind(h)
+        .bind(ingested_height)
+        .execute(&self.pool)
+        .await?;
+
+        sqlx::query(
+            r#"
+UPDATE ingestor_checkpoint
+SET finalized_height = $1,
+    updated_at = NOW()
+WHERE id = 1
+"#,
+        )
+        .bind(finalized_height)
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -85,13 +118,19 @@ mod tests {
         }
 
         let checkpoint = Checkpoint::new(pool.clone());
-        assert_eq!(checkpoint.get().await?, 0);
+        let initial = checkpoint.get_state().await?;
+        assert_eq!(initial.ingested_height, 0);
+        assert_eq!(initial.finalized_height, 0);
 
-        checkpoint.set(42).await?;
-        assert_eq!(checkpoint.get().await?, 42);
+        checkpoint.set(42, 21).await?;
+        let mid = checkpoint.get_state().await?;
+        assert_eq!(mid.ingested_height, 42);
+        assert_eq!(mid.finalized_height, 21);
 
-        checkpoint.set(1337).await?;
-        assert_eq!(checkpoint.get().await?, 1337);
+        checkpoint.set(1337, 1300).await?;
+        let end = checkpoint.get_state().await?;
+        assert_eq!(end.ingested_height, 1337);
+        assert_eq!(end.finalized_height, 1300);
 
         Ok(())
     }
