@@ -230,6 +230,11 @@ ON CONFLICT (block_height) DO UPDATE
         .execute(&mut **tx)
         .await?;
 
+        sqlx::query("UPDATE public.blocks SET analytics_pending = FALSE WHERE height=$1")
+            .bind(height)
+            .execute(&mut **tx)
+            .await?;
+
         Ok(())
     }
 

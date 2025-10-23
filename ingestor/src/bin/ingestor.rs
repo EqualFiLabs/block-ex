@@ -40,6 +40,7 @@ async fn main() -> Result<()> {
 
     let limiter = Arc::new(limits::make_limiter(args.rpc_rps, args.bootstrap));
     let conc = limits::eff_concurrency(args.ingest_concurrency, args.bootstrap);
+    let do_analytics = !args.bootstrap;
 
     info!("connecting to database");
     let store = Store::connect(&args.database_url)
@@ -119,13 +120,13 @@ async fn main() -> Result<()> {
                 .as_deref()
                 .or_else(|| block_value.get("miner_tx_hash").and_then(Value::as_str))
                 .context("missing miner_tx_hash in block json")?;
-            prepared_txs.push(prepare_tx(&miner_tx_json, Some(miner_hash))?);
+            prepared_txs.push(prepare_tx(&miner_tx_json, Some(miner_hash), do_analytics)?);
         } else {
             warn!(height = height_u64, "miner_tx missing from block json");
         }
 
         for (hash, blob) in tx_json_pairs {
-            prepared_txs.push(prepare_tx(&blob, Some(&hash))?);
+            prepared_txs.push(prepare_tx(&blob, Some(&hash), do_analytics)?);
         }
 
         persist_block(
@@ -136,6 +137,7 @@ async fn main() -> Result<()> {
             tip_height_i64,
             finalized_height_i64,
             args.finality_window,
+            do_analytics,
         )
         .await?;
 
@@ -265,9 +267,12 @@ fn extract_tx_hashes(block: &Value) -> Vec<String> {
         .unwrap_or_default()
 }
 
-fn prepare_tx(json_str: &str, fallback_hash: Option<&str>) -> Result<PreparedTx> {
+fn prepare_tx(
+    json_str: &str,
+    fallback_hash: Option<&str>,
+    do_analytics: bool,
+) -> Result<PreparedTx> {
     let tx_json = parse_tx_json(json_str).context("parse tx json")?;
-    let analysis = analyze_tx(&tx_json).context("analyze tx")?;
     let value: Value = serde_json::from_str(json_str).context("tx json to value")?;
 
     let hash_str = value
@@ -291,15 +296,38 @@ fn prepare_tx(json_str: &str, fallback_hash: Option<&str>) -> Result<PreparedTx>
     let version = i32::try_from(tx_json.version).context("tx version overflow")?;
     let unlock_time = i64::try_from(tx_json.unlock_time).context("unlock time overflow")?;
     let size_bytes = i32::try_from(size).unwrap_or(i32::MAX);
-    let num_inputs = i32::try_from(analysis.num_inputs).context("inputs overflow")?;
-    let num_outputs = i32::try_from(analysis.num_outputs).context("outputs overflow")?;
-    let rct_type_i32 = i32::try_from(rct_type).unwrap_or_default();
-
-    let proof_type = if analysis.bp_plus {
-        Some("CLSAG".to_string())
+    let (num_inputs_usize, num_outputs_usize, bp_plus, proof_type) = if do_analytics {
+        let analysis = analyze_tx(&tx_json).context("analyze tx")?;
+        let proof_type = if analysis.bp_plus {
+            Some("CLSAG".to_string())
+        } else {
+            None
+        };
+        (
+            analysis.num_inputs,
+            analysis.num_outputs,
+            analysis.bp_plus,
+            proof_type,
+        )
     } else {
-        None
+        let num_inputs = tx_json.vin.len();
+        let num_outputs = tx_json.vout.len();
+        let has_bp_plus = tx_json
+            .rctsig_prunable
+            .get("bp_plus")
+            .or_else(|| tx_json.rctsig_prunable.get("bp"))
+            .map(|v| !matches!(v, Value::Null))
+            .unwrap_or(false);
+        let proof_type = if has_bp_plus {
+            Some("CLSAG".to_string())
+        } else {
+            None
+        };
+        (num_inputs, num_outputs, has_bp_plus, proof_type)
     };
+    let num_inputs = i32::try_from(num_inputs_usize).context("inputs overflow")?;
+    let num_outputs = i32::try_from(num_outputs_usize).context("outputs overflow")?;
+    let rct_type_i32 = i32::try_from(rct_type).unwrap_or_default();
 
     let extra = serde_json::json!({ "extra": tx_json.extra });
 
@@ -313,7 +341,7 @@ fn prepare_tx(json_str: &str, fallback_hash: Option<&str>) -> Result<PreparedTx>
         extra,
         rct_type: rct_type_i32,
         proof_type,
-        bp_plus: analysis.bp_plus,
+        bp_plus,
         num_inputs,
         num_outputs,
     })
@@ -355,8 +383,10 @@ async fn persist_block(
     tip_height: i64,
     finalized_height: i64,
     finality_window: u64,
+    do_analytics: bool,
 ) -> Result<()> {
     let mut db_tx = store.begin_block().await.context("open sql transaction")?;
+    let mut mark_analytics_pending = false;
 
     let hash_bytes = hex::decode(&header.hash).context("decode block hash")?;
     let prev_hash_bytes = hex::decode(&header.prev_hash).context("decode prev hash")?;
@@ -421,9 +451,13 @@ async fn persist_block(
     .await
     .context("record chain tip")?;
 
-    Store::upsert_soft_facts_for_block(&mut db_tx, block_height)
-        .await
-        .context("upsert soft facts")?;
+    if do_analytics {
+        Store::upsert_soft_facts_for_block(&mut db_tx, block_height)
+            .await
+            .context("upsert soft facts")?;
+    } else {
+        mark_analytics_pending = true;
+    }
 
     let confirmations = tip_height.saturating_sub(block_height).saturating_add(1);
     let confirmations_i32 = i32::try_from(confirmations).unwrap_or(i32::MAX);
@@ -433,6 +467,14 @@ async fn persist_block(
         .context("update block confirmations")?;
 
     db_tx.commit().await.context("commit block")?;
+
+    if mark_analytics_pending {
+        sqlx::query("UPDATE public.blocks SET analytics_pending = TRUE WHERE height=$1")
+            .bind(block_height)
+            .execute(store.pool())
+            .await
+            .ok();
+    }
 
     checkpoint
         .set(block_height, finalized_height)
@@ -482,7 +524,8 @@ mod tests {
         let fallback =
             "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string();
 
-        let prepared = prepare_tx(json, Some(&fallback)).expect("prepare tx with fallback hash");
+        let prepared =
+            prepare_tx(json, Some(&fallback), true).expect("prepare tx with fallback hash");
 
         assert_eq!(prepared.hash_hex, fallback);
         assert_eq!(prepared.hash, hex::decode(&fallback).expect("hex decode"));

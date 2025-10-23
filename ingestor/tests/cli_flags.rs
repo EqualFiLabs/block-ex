@@ -1,12 +1,15 @@
 use clap::Parser;
+use serial_test::serial;
 use std::env;
 use std::ffi::OsString;
 
 #[test]
+#[serial]
 fn parse_defaults() {
     env::remove_var("INGEST_CONCURRENCY");
     env::remove_var("RPC_RPS");
     env::remove_var("BOOTSTRAP");
+    env::remove_var("CONCURRENCY");
     let mut v = vec![OsString::from("ingestor")];
     v.push("--database-url".into());
     v.push("postgres://x:x@localhost/x".into());
@@ -17,10 +20,12 @@ fn parse_defaults() {
 }
 
 #[test]
+#[serial]
 fn parse_env_overrides() {
     env::set_var("INGEST_CONCURRENCY", "32");
     env::set_var("RPC_RPS", "99");
     env::set_var("BOOTSTRAP", "true");
+    env::remove_var("CONCURRENCY");
     let args = super_args(vec![
         OsString::from("ingestor"),
         OsString::from("--database-url"),
@@ -32,6 +37,7 @@ fn parse_env_overrides() {
     env::remove_var("INGEST_CONCURRENCY");
     env::remove_var("RPC_RPS");
     env::remove_var("BOOTSTRAP");
+    env::remove_var("CONCURRENCY");
 }
 
 fn super_args<I>(itr: I) -> Args
