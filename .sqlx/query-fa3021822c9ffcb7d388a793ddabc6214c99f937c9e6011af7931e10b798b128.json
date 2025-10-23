@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\nSELECT MIN(height) AS \"min_height?\", MAX(height) AS \"max_height?\"\nFROM public.blocks\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "min_height?",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "max_height?",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "fa3021822c9ffcb7d388a793ddabc6214c99f937c9e6011af7931e10b798b128"
+}

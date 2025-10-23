@@ -1,0 +1,119 @@
+openapi: 3.1.0
+info:
+  title: Monero Explorer API
+  version: "0.1.0"
+servers:
+  - url: "/"
+paths:
+  /healthz:
+    get:
+      summary: Health check
+      responses:
+        "200":
+          description: OK
+
+  /api/v1/blocks:
+    get:
+      summary: List recent blocks or from start height
+      parameters:
+        - name: start
+          in: query
+          required: false
+          schema:
+            type: integer
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+      responses:
+        "200":
+          description: OK
+
+  /api/v1/block/{id}:
+    get:
+      summary: Get block by height or hash
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            oneOf:
+              - type: integer
+              - type: string
+                pattern: "^[0-9a-fA-F]{64}$"
+      responses:
+        "200":
+          description: OK
+        "404":
+          description: Not Found
+
+  /api/v1/tx/{hash}:
+    get:
+      summary: Get transaction by hash
+      parameters:
+        - name: hash
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^[0-9a-fA-F]{64}$"
+      responses:
+        "200":
+          description: OK
+        "404":
+          description: Not Found
+
+  /api/v1/tx/{hash}/rings:
+    get:
+      summary: Get ring members for a tx
+      parameters:
+        - name: hash
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^[0-9a-fA-F]{64}$"
+      responses:
+        "200":
+          description: OK
+
+  /api/v1/mempool:
+    get:
+      summary: List mempool transactions
+      responses:
+        "200":
+          description: OK
+
+  /api/v1/key_image/{hex}:
+    get:
+      summary: Lookup by key image
+      parameters:
+        - name: hex
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^[0-9a-fA-F]{64}$"
+      responses:
+        "200":
+          description: OK
+        "404":
+          description: Not Found
+
+  /api/v1/search:
+    get:
+      summary: Smart search for height/hash/key image/global index
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+        "404":
+          description: No Match

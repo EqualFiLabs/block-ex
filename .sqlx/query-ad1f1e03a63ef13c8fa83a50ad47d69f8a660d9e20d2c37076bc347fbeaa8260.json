@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\nWITH params AS (\n  SELECT $1::bigint AS start_h, $2::bigint AS tip_h, $3::bigint AS finalized_h\n)\nUPDATE public.blocks AS b\nSET confirmations = GREATEST(params.tip_h - b.height + 1, 0),\n    is_final = b.height <= params.finalized_h\nFROM params\nWHERE b.height BETWEEN params.start_h AND params.tip_h\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ad1f1e03a63ef13c8fa83a50ad47d69f8a660d9e20d2c37076bc347fbeaa8260"
+}
