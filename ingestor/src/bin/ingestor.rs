@@ -1,4 +1,4 @@
-use std::{convert::TryFrom, num::NonZeroU32, sync::Arc, time::Duration};
+use std::{collections::HashSet, convert::TryFrom, num::NonZeroU32, sync::Arc, time::Duration};
 
 use anyhow::{anyhow, Context, Result};
 use clap::Parser;
@@ -128,10 +128,10 @@ async fn main() -> Result<()> {
         let block_value: Value = serde_json::from_str(&block_json).context("parse block json")?;
 
         let tx_hashes = extract_tx_hashes(&block_value);
-        let tx_json_blobs =
+        let tx_json_pairs =
             fetch_transactions(&rpc, &limiter, &tx_hashes, args.concurrency).await?;
 
-        let mut prepared_txs = Vec::with_capacity(tx_json_blobs.len() + 1);
+        let mut prepared_txs = Vec::with_capacity(tx_json_pairs.len() + 1);
 
         if let Some(miner_tx_value) = block_value.get("miner_tx") {
             let miner_tx_json =
@@ -145,8 +145,8 @@ async fn main() -> Result<()> {
             warn!(height = height_u64, "miner_tx missing from block json");
         }
 
-        for blob in tx_json_blobs {
-            prepared_txs.push(prepare_tx(&blob, None)?);
+        for (hash, blob) in tx_json_pairs {
+            prepared_txs.push(prepare_tx(&blob, Some(&hash))?);
         }
 
         persist_block(
@@ -214,7 +214,7 @@ async fn fetch_transactions(
     limiter: &Arc<DefaultDirectRateLimiter>,
     hashes: &[String],
     concurrency: usize,
-) -> Result<Vec<String>> {
+) -> Result<Vec<(String, String)>> {
     if hashes.is_empty() {
         return Ok(Vec::new());
     }
@@ -238,7 +238,29 @@ async fn fetch_transactions(
             if !res.missed_tx.is_empty() {
                 warn!(missed = res.missed_tx.len(), "daemon missed transactions");
             }
-            Ok::<Vec<String>, anyhow::Error>(res.txs_as_json)
+
+            let missed: HashSet<String> = res.missed_tx.into_iter().collect();
+            let mut json_iter = res.txs_as_json.into_iter();
+            let mut paired = Vec::with_capacity(chunk.len().saturating_sub(missed.len()));
+
+            for hash in chunk.into_iter() {
+                if missed.contains(&hash) {
+                    continue;
+                }
+                let json = json_iter
+                    .next()
+                    .ok_or_else(|| anyhow!("daemon returned fewer txs than expected"))?;
+                paired.push((hash, json));
+            }
+
+            if let Some(extra) = json_iter.next() {
+                warn!(
+                    extra_len = extra.len(),
+                    "daemon returned extra transaction payload"
+                );
+            }
+
+            Ok::<Vec<(String, String)>, anyhow::Error>(paired)
         }
     }));
 
@@ -463,4 +485,27 @@ struct PreparedTx {
     bp_plus: bool,
     num_inputs: i32,
     num_outputs: i32,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn prepare_tx_falls_back_to_supplied_hash() {
+        let json = r#"{
+            "version": 1,
+            "unlock_time": 0,
+            "vin": [],
+            "vout": [],
+            "extra": []
+        }"#;
+        let fallback =
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string();
+
+        let prepared = prepare_tx(json, Some(&fallback)).expect("prepare tx with fallback hash");
+
+        assert_eq!(prepared.hash_hex, fallback);
+        assert_eq!(prepared.hash, hex::decode(&fallback).expect("hex decode"));
+    }
 }

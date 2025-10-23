@@ -119,15 +119,31 @@ impl Rpc {
             prune: bool,
         }
 
-        self.call(
-            "get_transactions",
-            P {
+        let url = format!("{}/get_transactions", self.base_rest);
+        let res = self
+            .http
+            .post(&url)
+            .json(&P {
                 txs_hashes,
                 decode_as_json: true,
                 prune: false,
-            },
-        )
-        .await
+            })
+            .send()
+            .await
+            .with_context(|| "get_transactions send failed".to_string())?;
+
+        let status = res.status();
+        if !status.is_success() {
+            let body = res
+                .text()
+                .await
+                .unwrap_or_else(|_| "<binary response>".to_string());
+            anyhow::bail!("get_transactions HTTP {}: {}", status, body);
+        }
+
+        res.json::<GetTransactionsResult>()
+            .await
+            .with_context(|| "get_transactions decode failed".to_string())
     }
 
     pub async fn get_block_count(&self) -> Result<GetBlockCountResult> {
@@ -266,6 +282,39 @@ mod tests {
         assert!(err
             .to_string()
             .contains("get_transaction_pool_hashes status BUSY"));
+        mock.assert();
+    }
+
+    #[tokio::test]
+    async fn get_transactions_via_rest() {
+        let server = MockServer::start();
+        let mock = server.mock(|when, then| {
+            when.method(POST)
+                .path("/get_transactions")
+                .json_body(json!({
+                    "txs_hashes": ["deadbeef"],
+                    "decode_as_json": true,
+                    "prune": false,
+                }));
+            then.status(200).json_body(json!({
+                "status": "OK",
+                "txs_as_json": ["{\"tx_hash\":\"deadbeef\"}"],
+                "missed_tx": [],
+            }));
+        });
+
+        let rpc = Rpc::new(format!("{}/json_rpc", server.url("")));
+        let hashes = vec!["deadbeef".to_string()];
+        let res = rpc
+            .get_transactions(&hashes)
+            .await
+            .expect("rest get_transactions");
+
+        assert_eq!(
+            res.txs_as_json,
+            vec!["{\"tx_hash\":\"deadbeef\"}".to_string()]
+        );
+        assert!(res.missed_tx.is_empty());
         mock.assert();
     }
 }
