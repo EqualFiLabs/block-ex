@@ -1,35 +1,32 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from '/vite.svg'
-import './App.css'
+import { Outlet, Link, useRouteError } from "react-router-dom";
+import Header from "./components/Header";
 
-function App() {
-  const [count, setCount] = useState(0)
-
+export default function App() {
   return (
-    <>
-      <div>
-        <a href="https://vite.dev" target="_blank">
-          <img src={viteLogo} className="logo" alt="Vite logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
-      </div>
-      <h1>Vite + React</h1>
-      <div className="card">
-        <button onClick={() => setCount((count) => count + 1)}>
-          count is {count}
-        </button>
-        <p>
-          Edit <code>src/App.tsx</code> and save to test HMR
-        </p>
-      </div>
-      <p className="read-the-docs">
-        Click on the Vite and React logos to learn more
-      </p>
-    </>
-  )
+    <div className="min-h-full">
+      <Header />
+      <main className="mx-auto max-w-6xl px-4 py-6">
+        <Outlet />
+      </main>
+      <footer className="mx-auto max-w-6xl px-4 pb-8 text-sm text-slate-500">
+        Built for research & education. Ring members are decoys; no ownership is implied.
+      </footer>
+    </div>
+  );
 }
 
-export default App
+export function ErrorBoundary() {
+  const err = useRouteError();
+  const message =
+    err instanceof Error ? err.message : typeof err === "string" ? err : JSON.stringify(err, null, 2);
+
+  return (
+    <div className="p-6">
+      <h1 className="text-xl font-semibold">Something went wrong</h1>
+      <pre className="mt-2 rounded bg-slate-100 p-3">{message}</pre>
+      <Link to="/" className="btn mt-4">
+        Go Home
+      </Link>
+    </div>
+  );
+}
