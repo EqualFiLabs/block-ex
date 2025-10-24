@@ -24,9 +24,15 @@ pub async fn run(
     _shutdown: Option<Shutdown>,
 ) -> Result<()> {
     let mut processed = 0u64;
-    while let Some(msg) = rx.recv().await {
+    loop {
+        let maybe_msg = rx.recv().await;
+        crate::pipeline::record_queue_depth_receiver("tx", &rx);
+        let Some(msg) = maybe_msg else {
+            break;
+        };
         let prepared = prepare_block(&msg, cfg.do_analytics)?;
         persist_block(&cfg, &msg, &prepared).await?;
+        metrics::histogram!("block_process_ms").record(msg.started.elapsed().as_millis() as f64);
         processed += 1;
         if processed % 100 == 0 {
             info!(processed, "persistence progress");

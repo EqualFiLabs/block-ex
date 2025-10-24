@@ -1,4 +1,8 @@
-use std::{convert::TryFrom, sync::Arc, time::Duration};
+use std::{
+    convert::TryFrom,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use anyhow::{Context, Result};
 use governor::DefaultDirectRateLimiter;
@@ -80,12 +84,15 @@ pub async fn run(
                 height: next_height,
                 tip_height: tip_height_i64,
                 finalized_height: finalized_height_i64,
+                started: Instant::now(),
             })
             .await
             .is_err()
         {
             break;
         }
+
+        crate::pipeline::record_queue_depth_sender("sched", &tx);
 
         processed_blocks += 1;
         next_height += 1;

@@ -3,6 +3,10 @@ use async_trait::async_trait;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
+fn record_rpc_error(method: &str) {
+    metrics::counter!("rpc_errors_total", "method" => method.to_string()).increment(1);
+}
+
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Capabilities {
     pub headers_range: bool,
@@ -89,19 +93,32 @@ impl Rpc {
             .json(&body)
             .send()
             .await
+            .map_err(|err| {
+                record_rpc_error(method);
+                err
+            })
             .with_context(|| format!("RPC {} send failed", method))?;
 
         let status = res.status();
         let v = res
             .json::<serde_json::Value>()
             .await
+            .map_err(|err| {
+                record_rpc_error(method);
+                err
+            })
             .with_context(|| "RPC JSON decode failed".to_string())?;
 
         if !status.is_success() {
+            record_rpc_error(method);
             anyhow::bail!("RPC {} HTTP {}: {}", method, status, v);
         }
 
         match serde_json::from_value::<RpcResponse<T>>(v)
+            .map_err(|err| {
+                record_rpc_error(method);
+                err
+            })
             .with_context(|| "RPC result decode failed")?
         {
             RpcResponse::Ok { result } => Ok(result),
@@ -110,7 +127,11 @@ impl Rpc {
                 method,
                 error.code,
                 error.message
-            )),
+            ))
+            .map_err(|err| {
+                record_rpc_error(method);
+                err
+            }),
         }
     }
 
@@ -184,7 +205,10 @@ impl Rpc {
                 },
             )
             .await?;
-        anyhow::ensure!(r.status == "OK", "bad status");
+        if r.status != "OK" {
+            record_rpc_error("get_block_headers_range");
+            anyhow::bail!("bad status");
+        }
         Ok(r.headers)
     }
 
@@ -217,10 +241,15 @@ impl Rpc {
             })
             .send()
             .await
+            .map_err(|err| {
+                record_rpc_error("get_transactions");
+                err
+            })
             .with_context(|| "get_transactions send failed".to_string())?;
 
         let status = res.status();
         if !status.is_success() {
+            record_rpc_error("get_transactions");
             let body = res
                 .text()
                 .await
@@ -230,6 +259,10 @@ impl Rpc {
 
         res.json::<GetTransactionsResult>()
             .await
+            .map_err(|err| {
+                record_rpc_error("get_transactions");
+                err
+            })
             .with_context(|| "get_transactions decode failed".to_string())
     }
 
@@ -251,15 +284,24 @@ impl Rpc {
             .get(&url)
             .send()
             .await
+            .map_err(|err| {
+                record_rpc_error("get_transaction_pool_hashes");
+                err
+            })
             .with_context(|| "get_transaction_pool_hashes send failed".to_string())?;
 
         let status = res.status();
         let body = res
             .json::<RestResponse>()
             .await
+            .map_err(|err| {
+                record_rpc_error("get_transaction_pool_hashes");
+                err
+            })
             .with_context(|| "get_transaction_pool_hashes decode failed".to_string())?;
 
         if !status.is_success() {
+            record_rpc_error("get_transaction_pool_hashes");
             anyhow::bail!(
                 "get_transaction_pool_hashes HTTP {} status {}",
                 status,
@@ -270,6 +312,7 @@ impl Rpc {
         if body.status == "OK" {
             Ok(body.tx_hashes)
         } else {
+            record_rpc_error("get_transaction_pool_hashes");
             Err(anyhow!(
                 "get_transaction_pool_hashes status {}",
                 body.status

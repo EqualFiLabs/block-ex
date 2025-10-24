@@ -26,7 +26,9 @@ pub async fn run(
     loop {
         let block_job = {
             let mut guard = rx.lock().await;
-            guard.recv().await
+            let job = guard.recv().await;
+            crate::pipeline::record_queue_depth_receiver("block", &*guard);
+            job
         };
         let Some(block_job) = block_job else {
             break;
@@ -54,11 +56,14 @@ pub async fn run(
             miner_tx_json: block_job.miner_tx_json,
             miner_tx_hash: block_job.miner_tx_hash,
             ordered_tx_hashes: ordered_hashes,
+            started: block_job.started,
         };
 
         if tx.send(msg).await.is_err() {
             break;
         }
+
+        crate::pipeline::record_queue_depth_sender("tx", &tx);
     }
 
     Ok(())

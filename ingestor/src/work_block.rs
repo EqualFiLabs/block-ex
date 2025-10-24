@@ -45,7 +45,9 @@ pub async fn run(
     loop {
         let job = {
             let mut guard = rx.lock().await;
-            guard.recv().await
+            let job = guard.recv().await;
+            crate::pipeline::record_queue_depth_receiver("sched", &*guard);
+            job
         };
         let Some(job) = job else {
             break;
@@ -67,6 +69,8 @@ pub async fn run(
         if tx.send(block).await.is_err() {
             break;
         }
+
+        crate::pipeline::record_queue_depth_sender("block", &tx);
     }
 
     Ok(())
@@ -143,6 +147,7 @@ async fn process_height(
         header,
         miner_tx_json,
         miner_tx_hash,
+        started: msg.started,
     })
 }
 

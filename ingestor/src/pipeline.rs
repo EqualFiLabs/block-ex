@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use tokio::sync::{mpsc, oneshot};
 
 use crate::rpc::BlockHeader;
@@ -8,6 +10,7 @@ pub struct SchedMsg {
     pub height: i64,
     pub tip_height: i64,
     pub finalized_height: i64,
+    pub started: Instant,
 }
 
 pub struct BlockMsg {
@@ -20,6 +23,7 @@ pub struct BlockMsg {
     pub header: BlockHeader,
     pub miner_tx_json: Option<String>,
     pub miner_tx_hash: Option<String>,
+    pub started: Instant,
 }
 
 pub struct TxMsg {
@@ -33,6 +37,7 @@ pub struct TxMsg {
     pub miner_tx_json: Option<String>,
     pub miner_tx_hash: Option<String>,
     pub ordered_tx_hashes: Vec<String>,
+    pub started: Instant,
 }
 
 pub struct PipelineCfg {
@@ -55,4 +60,14 @@ pub fn make_channels(
     let (s2, r2) = mpsc::channel(cfg.block_workers * 4);
     let (s3, r3) = mpsc::channel(cfg.tx_workers * 4);
     (s1, r1, s2, r2, s3, r3)
+}
+
+pub fn record_queue_depth_sender<T>(queue: &'static str, sender: &mpsc::Sender<T>) {
+    let depth = sender.max_capacity().saturating_sub(sender.capacity());
+    metrics::gauge!("queue_depth", "queue" => queue).set(depth as f64);
+}
+
+pub fn record_queue_depth_receiver<T>(queue: &'static str, receiver: &mpsc::Receiver<T>) {
+    let depth = receiver.max_capacity().saturating_sub(receiver.capacity());
+    metrics::gauge!("queue_depth", "queue" => queue).set(depth as f64);
 }

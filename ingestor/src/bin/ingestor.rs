@@ -1,4 +1,4 @@
-use std::{convert::TryFrom, env, sync::Arc};
+use std::{convert::TryFrom, env, net::SocketAddr, sync::Arc};
 
 use anyhow::{Context, Result};
 use clap::{Args as ClapArgs, Parser, Subcommand};
@@ -47,6 +47,38 @@ async fn main() -> Result<()> {
         .with_env_filter(env_filter)
         .with_target(false)
         .init();
+
+    let builder = metrics_exporter_prometheus::PrometheusBuilder::new();
+    let recorder = builder
+        .install_recorder()
+        .context("install prometheus recorder")?;
+    let metrics_addr: SocketAddr = "0.0.0.0:9898"
+        .parse()
+        .context("parse metrics listen address")?;
+    tokio::spawn({
+        let handle = recorder.clone();
+        async move {
+            use axum::{routing::get, Router};
+            let route_handle = handle.clone();
+            let app = Router::new().route(
+                "/metrics",
+                get(move || {
+                    let handle = route_handle.clone();
+                    async move { handle.render() }
+                }),
+            );
+            match tokio::net::TcpListener::bind(metrics_addr).await {
+                Ok(listener) => {
+                    if let Err(err) = axum::serve(listener, app.into_make_service()).await {
+                        error!(error = ?err, "prometheus exporter failed");
+                    }
+                }
+                Err(err) => {
+                    error!(error = ?err, "prometheus exporter bind failed");
+                }
+            }
+        }
+    });
 
     if env::var("INGEST_CONCURRENCY").is_err() {
         if let Ok(val) = env::var("CONCURRENCY") {
