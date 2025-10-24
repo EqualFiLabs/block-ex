@@ -4,6 +4,242 @@ info:
   version: "0.1.0"
 servers:
   - url: "/"
+components:
+  schemas:
+    ErrorResponse:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: string
+    HealthResponse:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          enum: ["ok"]
+    BlockView:
+      type: object
+      required:
+        - height
+        - size_bytes
+        - major_version
+        - minor_version
+        - tx_count
+        - reward_nanos
+      properties:
+        height:
+          type: integer
+          format: int64
+        hash:
+          type: string
+          pattern: "^[0-9a-fA-F]{64}$"
+          nullable: true
+        ts:
+          type: integer
+          format: int64
+          nullable: true
+        size_bytes:
+          type: integer
+        major_version:
+          type: integer
+        minor_version:
+          type: integer
+        tx_count:
+          type: integer
+        reward_nanos:
+          type: integer
+          format: int64
+    TxView:
+      type: object
+      required:
+        - in_mempool
+        - size_bytes
+        - version
+        - unlock_time
+        - rct_type
+        - bp_plus
+        - num_inputs
+        - num_outputs
+      properties:
+        hash:
+          type: string
+          pattern: "^[0-9a-fA-F]{64}$"
+          nullable: true
+        block_height:
+          type: integer
+          format: int64
+          nullable: true
+        ts:
+          type: integer
+          format: int64
+          nullable: true
+        in_mempool:
+          type: boolean
+        fee_nanos:
+          type: integer
+          format: int64
+          nullable: true
+        size_bytes:
+          type: integer
+        version:
+          type: integer
+        unlock_time:
+          type: integer
+          format: int64
+        extra_json:
+          type: string
+          nullable: true
+        rct_type:
+          type: integer
+        proof_type:
+          type: string
+          nullable: true
+        bp_plus:
+          type: boolean
+        num_inputs:
+          type: integer
+        num_outputs:
+          type: integer
+    InputView:
+      type: object
+      required:
+        - idx
+        - key_image
+        - ring_size
+      properties:
+        idx:
+          type: integer
+        key_image:
+          type: string
+          pattern: "^[0-9a-fA-F]{64}$"
+        ring_size:
+          type: integer
+        pseudo_out:
+          type: string
+          pattern: "^[0-9a-fA-F]+$"
+          nullable: true
+    OutputView:
+      type: object
+      required:
+        - idx_in_tx
+        - commitment
+        - stealth_public_key
+      properties:
+        idx_in_tx:
+          type: integer
+        global_index:
+          type: integer
+          format: int64
+          nullable: true
+        amount:
+          type: string
+          nullable: true
+        commitment:
+          type: string
+          pattern: "^[0-9a-fA-F]+$"
+        stealth_public_key:
+          type: string
+          pattern: "^[0-9a-fA-F]+$"
+        spent_by_key_image:
+          type: string
+          pattern: "^[0-9a-fA-F]{64}$"
+          nullable: true
+        spent_in_tx:
+          type: string
+          pattern: "^[0-9a-fA-F]{64}$"
+          nullable: true
+    TxDetailView:
+      allOf:
+        - $ref: "#/components/schemas/TxView"
+        - type: object
+          required:
+            - inputs
+            - outputs
+          properties:
+            inputs:
+              type: array
+              items:
+                $ref: "#/components/schemas/InputView"
+            outputs:
+              type: array
+              items:
+                $ref: "#/components/schemas/OutputView"
+    RingMemberView:
+      type: object
+      required:
+        - ring_index
+      properties:
+        ring_index:
+          type: integer
+        global_index:
+          type: integer
+          format: int64
+          nullable: true
+    RingSetView:
+      type: object
+      required:
+        - input_idx
+        - members
+      properties:
+        input_idx:
+          type: integer
+        members:
+          type: array
+          items:
+            $ref: "#/components/schemas/RingMemberView"
+    MempoolView:
+      type: object
+      properties:
+        hash:
+          type: string
+          pattern: "^[0-9a-fA-F]{64}$"
+          nullable: true
+        first_seen:
+          type: integer
+          format: int64
+          nullable: true
+        last_seen:
+          type: integer
+          format: int64
+          nullable: true
+        fee_rate:
+          type: string
+          nullable: true
+        relayed_by:
+          type: string
+          nullable: true
+    KeyImageView:
+      type: object
+      properties:
+        key_image:
+          type: string
+          pattern: "^[0-9a-fA-F]{64}$"
+          nullable: true
+        spending_tx:
+          type: string
+          pattern: "^[0-9a-fA-F]{64}$"
+          nullable: true
+        block_height:
+          type: integer
+          format: int64
+          nullable: true
+    SearchResult:
+      type: object
+      required:
+        - kind
+        - value
+      properties:
+        kind:
+          type: string
+          enum: [block, tx, key_image, height, global_index]
+        value:
+          oneOf:
+            - type: string
+            - type: integer
 paths:
   /healthz:
     get:
@@ -11,7 +247,10 @@ paths:
       responses:
         "200":
           description: OK
-
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
   /api/v1/blocks:
     get:
       summary: List recent blocks or from start height
@@ -21,6 +260,7 @@ paths:
           required: false
           schema:
             type: integer
+            format: int64
         - name: limit
           in: query
           required: false
@@ -31,7 +271,18 @@ paths:
       responses:
         "200":
           description: OK
-
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/BlockView"
+        "500":
+          description: Database error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /api/v1/block/{id}:
     get:
       summary: Get block by height or hash
@@ -42,14 +293,28 @@ paths:
           schema:
             oneOf:
               - type: integer
+                format: int64
               - type: string
                 pattern: "^[0-9a-fA-F]{64}$"
       responses:
         "200":
           description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BlockView"
         "404":
-          description: Not Found
-
+          description: Block not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Database error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /api/v1/tx/{hash}:
     get:
       summary: Get transaction by hash
@@ -63,12 +328,31 @@ paths:
       responses:
         "200":
           description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TxDetailView"
+        "400":
+          description: Invalid transaction hash
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "404":
-          description: Not Found
-
+          description: Transaction not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Database error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /api/v1/tx/{hash}/rings:
     get:
-      summary: Get ring members for a tx
+      summary: Get ring members for a transaction, grouped by input
       parameters:
         - name: hash
           in: path
@@ -79,14 +363,42 @@ paths:
       responses:
         "200":
           description: OK
-
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/RingSetView"
+        "400":
+          description: Invalid transaction hash
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Database error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /api/v1/mempool:
     get:
       summary: List mempool transactions
       responses:
         "200":
           description: OK
-
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/MempoolView"
+        "500":
+          description: Database error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /api/v1/key_image/{hex}:
     get:
       summary: Lookup by key image
@@ -100,9 +412,28 @@ paths:
       responses:
         "200":
           description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KeyImageView"
+        "400":
+          description: Invalid key image
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "404":
-          description: Not Found
-
+          description: Key image not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Database error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /api/v1/search:
     get:
       summary: Smart search for height/hash/key image/global index
@@ -115,5 +446,29 @@ paths:
       responses:
         "200":
           description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SearchResult"
         "404":
-          description: No Match
+          description: No match
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Database error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api-docs:
+    get:
+      summary: Retrieve OpenAPI specification
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object

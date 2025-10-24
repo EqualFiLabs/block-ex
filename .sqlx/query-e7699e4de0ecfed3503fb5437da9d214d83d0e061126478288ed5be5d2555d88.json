@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO public.blocks (height, hash, prev_hash, block_timestamp, size_bytes, major_version, minor_version, nonce, tx_count, reward_nanos, analytics_pending)\n                  VALUES ($1, decode($2,'hex'), decode($3,'hex'), NOW(), 100,14,14,0,0,0, TRUE)\n                  ON CONFLICT DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e7699e4de0ecfed3503fb5437da9d214d83d0e061126478288ed5be5d2555d88"
+}

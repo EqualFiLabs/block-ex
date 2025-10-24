@@ -1,10 +1,10 @@
-use std::{str, thread, time::Duration};
+use std::{str, sync::Arc, thread, time::Duration};
 
 use anyhow::{Context, Result};
 use tokio::runtime::Handle;
 use tracing::{debug, error, info, warn};
 
-use crate::{rpc::Rpc, store::Store};
+use crate::{rpc::MoneroRpc, store::Store};
 
 const RAW_TX: &str = "raw_tx";
 const RAW_BLOCK: &str = "raw_block";
@@ -12,12 +12,12 @@ const RECEIVE_TIMEOUT_MS: i32 = 5_000;
 
 pub struct MempoolWatcher {
     zmq_addr: String,
-    rpc: Rpc,
+    rpc: Arc<dyn MoneroRpc>,
     store: Store,
 }
 
 impl MempoolWatcher {
-    pub fn new<S: Into<String>>(zmq_addr: S, rpc: Rpc, store: Store) -> Self {
+    pub fn new<S: Into<String>>(zmq_addr: S, rpc: Arc<dyn MoneroRpc>, store: Store) -> Self {
         Self {
             zmq_addr: zmq_addr.into(),
             rpc,

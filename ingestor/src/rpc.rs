@@ -1,6 +1,35 @@
 use anyhow::{anyhow, Context, Result};
+use async_trait::async_trait;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+
+fn record_rpc_error(method: &str) {
+    metrics::counter!("rpc_errors_total", "method" => method.to_string()).increment(1);
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Capabilities {
+    pub headers_range: bool,
+    pub blocks_by_height_bin: bool,
+}
+
+#[async_trait]
+pub trait MoneroRpc: Send + Sync {
+    async fn get_block_header_by_height(&self, height: u64)
+        -> Result<GetBlockHeaderByHeightResult>;
+
+    async fn get_block_headers_range(&self, start: u64, end: u64) -> Result<Vec<BlockHeader>>;
+
+    async fn get_block(&self, hash: &str, fill_pow: bool) -> Result<GetBlockResult>;
+
+    async fn get_transactions(&self, txs_hashes: &[String]) -> Result<GetTransactionsResult>;
+
+    async fn get_block_count(&self) -> Result<GetBlockCountResult>;
+
+    async fn get_transaction_pool_hashes(&self) -> Result<Vec<String>>;
+
+    async fn probe_caps(&self) -> Capabilities;
+}
 
 #[derive(Clone)]
 pub struct Rpc {
@@ -25,7 +54,7 @@ impl Rpc {
         }
     }
 
-    async fn call<T: for<'de> Deserialize<'de>, P: Serialize>(
+    async fn raw_call<T: for<'de> Deserialize<'de>, P: Serialize>(
         &self,
         method: &str,
         params: P,
@@ -64,19 +93,32 @@ impl Rpc {
             .json(&body)
             .send()
             .await
+            .map_err(|err| {
+                record_rpc_error(method);
+                err
+            })
             .with_context(|| format!("RPC {} send failed", method))?;
 
         let status = res.status();
         let v = res
             .json::<serde_json::Value>()
             .await
+            .map_err(|err| {
+                record_rpc_error(method);
+                err
+            })
             .with_context(|| "RPC JSON decode failed".to_string())?;
 
         if !status.is_success() {
+            record_rpc_error(method);
             anyhow::bail!("RPC {} HTTP {}: {}", method, status, v);
         }
 
         match serde_json::from_value::<RpcResponse<T>>(v)
+            .map_err(|err| {
+                record_rpc_error(method);
+                err
+            })
             .with_context(|| "RPC result decode failed")?
         {
             RpcResponse::Ok { result } => Ok(result),
@@ -85,7 +127,47 @@ impl Rpc {
                 method,
                 error.code,
                 error.message
-            )),
+            ))
+            .map_err(|err| {
+                record_rpc_error(method);
+                err
+            }),
+        }
+    }
+
+    async fn call<T: for<'de> Deserialize<'de>, P: Serialize>(
+        &self,
+        method: &str,
+        params: P,
+    ) -> Result<T> {
+        self.raw_call(method, params).await
+    }
+
+    pub async fn probe_caps(&self) -> Capabilities {
+        let hdrs_ok = self
+            .raw_call::<serde_json::Value, _>(
+                "get_block_headers_range",
+                serde_json::json!({
+                    "start_height": 0,
+                    "end_height": 0,
+                }),
+            )
+            .await
+            .is_ok();
+
+        let bin_url = format!("{}/get_blocks_by_height.bin?heights=0", self.base_rest);
+
+        let bin_ok = match self.http.head(&bin_url).send().await {
+            Ok(res) if res.status().is_success() => true,
+            _ => match self.http.get(&bin_url).send().await {
+                Ok(res) => res.status().is_success(),
+                Err(_) => false,
+            },
+        };
+
+        Capabilities {
+            headers_range: hdrs_ok,
+            blocks_by_height_bin: bin_ok,
         }
     }
 
@@ -99,6 +181,35 @@ impl Rpc {
         }
 
         self.call("get_block_header_by_height", P { height }).await
+    }
+
+    pub async fn get_block_headers_range(&self, start: u64, end: u64) -> Result<Vec<BlockHeader>> {
+        #[derive(Serialize)]
+        struct P {
+            start_height: u64,
+            end_height: u64,
+        }
+
+        #[derive(Deserialize)]
+        struct R {
+            status: String,
+            headers: Vec<BlockHeader>,
+        }
+
+        let r: R = self
+            .raw_call(
+                "get_block_headers_range",
+                &P {
+                    start_height: start,
+                    end_height: end,
+                },
+            )
+            .await?;
+        if r.status != "OK" {
+            record_rpc_error("get_block_headers_range");
+            anyhow::bail!("bad status");
+        }
+        Ok(r.headers)
     }
 
     pub async fn get_block(&self, hash: &str, fill_pow: bool) -> Result<GetBlockResult> {
@@ -119,15 +230,40 @@ impl Rpc {
             prune: bool,
         }
 
-        self.call(
-            "get_transactions",
-            P {
+        let url = format!("{}/get_transactions", self.base_rest);
+        let res = self
+            .http
+            .post(&url)
+            .json(&P {
                 txs_hashes,
                 decode_as_json: true,
                 prune: false,
-            },
-        )
-        .await
+            })
+            .send()
+            .await
+            .map_err(|err| {
+                record_rpc_error("get_transactions");
+                err
+            })
+            .with_context(|| "get_transactions send failed".to_string())?;
+
+        let status = res.status();
+        if !status.is_success() {
+            record_rpc_error("get_transactions");
+            let body = res
+                .text()
+                .await
+                .unwrap_or_else(|_| "<binary response>".to_string());
+            anyhow::bail!("get_transactions HTTP {}: {}", status, body);
+        }
+
+        res.json::<GetTransactionsResult>()
+            .await
+            .map_err(|err| {
+                record_rpc_error("get_transactions");
+                err
+            })
+            .with_context(|| "get_transactions decode failed".to_string())
     }
 
     pub async fn get_block_count(&self) -> Result<GetBlockCountResult> {
@@ -148,15 +284,24 @@ impl Rpc {
             .get(&url)
             .send()
             .await
+            .map_err(|err| {
+                record_rpc_error("get_transaction_pool_hashes");
+                err
+            })
             .with_context(|| "get_transaction_pool_hashes send failed".to_string())?;
 
         let status = res.status();
         let body = res
             .json::<RestResponse>()
             .await
+            .map_err(|err| {
+                record_rpc_error("get_transaction_pool_hashes");
+                err
+            })
             .with_context(|| "get_transaction_pool_hashes decode failed".to_string())?;
 
         if !status.is_success() {
+            record_rpc_error("get_transaction_pool_hashes");
             anyhow::bail!(
                 "get_transaction_pool_hashes HTTP {} status {}",
                 status,
@@ -167,11 +312,46 @@ impl Rpc {
         if body.status == "OK" {
             Ok(body.tx_hashes)
         } else {
+            record_rpc_error("get_transaction_pool_hashes");
             Err(anyhow!(
                 "get_transaction_pool_hashes status {}",
                 body.status
             ))
         }
+    }
+}
+
+#[async_trait]
+impl MoneroRpc for Rpc {
+    async fn get_block_headers_range(&self, start: u64, end: u64) -> Result<Vec<BlockHeader>> {
+        Rpc::get_block_headers_range(self, start, end).await
+    }
+
+    async fn get_block_header_by_height(
+        &self,
+        height: u64,
+    ) -> Result<GetBlockHeaderByHeightResult> {
+        Rpc::get_block_header_by_height(self, height).await
+    }
+
+    async fn get_block(&self, hash: &str, fill_pow: bool) -> Result<GetBlockResult> {
+        Rpc::get_block(self, hash, fill_pow).await
+    }
+
+    async fn get_transactions(&self, txs_hashes: &[String]) -> Result<GetTransactionsResult> {
+        Rpc::get_transactions(self, txs_hashes).await
+    }
+
+    async fn get_block_count(&self) -> Result<GetBlockCountResult> {
+        Rpc::get_block_count(self).await
+    }
+
+    async fn get_transaction_pool_hashes(&self) -> Result<Vec<String>> {
+        Rpc::get_transaction_pool_hashes(self).await
+    }
+
+    async fn probe_caps(&self) -> Capabilities {
+        Rpc::probe_caps(self).await
     }
 }
 
@@ -181,7 +361,7 @@ pub struct GetBlockHeaderByHeightResult {
     pub status: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct BlockHeader {
     pub hash: String,
     pub height: u64,
@@ -225,7 +405,7 @@ pub struct GetBlockCountResult {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use httpmock::prelude::*;
+    use httpmock::{prelude::*, Method::HEAD};
     use serde_json::json;
 
     #[tokio::test]
@@ -267,5 +447,69 @@ mod tests {
             .to_string()
             .contains("get_transaction_pool_hashes status BUSY"));
         mock.assert();
+    }
+
+    #[tokio::test]
+    async fn get_transactions_via_rest() {
+        let server = MockServer::start();
+        let mock = server.mock(|when, then| {
+            when.method(POST)
+                .path("/get_transactions")
+                .json_body(json!({
+                    "txs_hashes": ["deadbeef"],
+                    "decode_as_json": true,
+                    "prune": false,
+                }));
+            then.status(200).json_body(json!({
+                "status": "OK",
+                "txs_as_json": ["{\"tx_hash\":\"deadbeef\"}"],
+                "missed_tx": [],
+            }));
+        });
+
+        let rpc = Rpc::new(format!("{}/json_rpc", server.url("")));
+        let hashes = vec!["deadbeef".to_string()];
+        let res = rpc
+            .get_transactions(&hashes)
+            .await
+            .expect("rest get_transactions");
+
+        assert_eq!(
+            res.txs_as_json,
+            vec!["{\"tx_hash\":\"deadbeef\"}".to_string()]
+        );
+        assert!(res.missed_tx.is_empty());
+        mock.assert();
+    }
+
+    #[tokio::test]
+    async fn probe_caps_detects_range_and_bin() {
+        let server = MockServer::start();
+        let rpc = Rpc::new(format!("{}/json_rpc", server.url("")));
+
+        let _range = server.mock(|when, then| {
+            when.method(POST).path("/json_rpc").json_body(json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "get_block_headers_range",
+                "params": {"start_height": 0, "end_height": 0},
+            }));
+            then.status(200).json_body(json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "result": {"status": "OK", "headers": []},
+            }));
+        });
+
+        let _bin = server.mock(|when, then| {
+            when.method(HEAD)
+                .path("/get_blocks_by_height.bin")
+                .query_param("heights", "0");
+            then.status(200);
+        });
+
+        let caps = rpc.probe_caps().await;
+        assert!(caps.headers_range);
+        assert!(caps.blocks_by_height_bin);
     }
 }

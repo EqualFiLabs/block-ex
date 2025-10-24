@@ -2,7 +2,10 @@
 async fn soft_facts_exist_for_recent_block() {
     use ingestor::store::Store;
 
-    let db = std::env::var("DATABASE_URL").expect("DATABASE_URL");
+    let Ok(db) = std::env::var("DATABASE_URL") else {
+        eprintln!("skipping soft_facts_exist_for_recent_block: DATABASE_URL not set");
+        return;
+    };
     let pool = sqlx::PgPool::connect(&db).await.unwrap();
     // Find the latest block you ingested
     let rec = sqlx::query!("SELECT max(height) AS h FROM public.blocks")

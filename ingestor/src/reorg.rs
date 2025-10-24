@@ -1,12 +1,12 @@
 use anyhow::{anyhow, Context, Result};
 use hex::decode;
 
-use crate::{rpc::Rpc, store::Store};
+use crate::{rpc::MoneroRpc, store::Store};
 
 pub async fn heal_reorg(
     start_height: i64,
     store: &Store,
-    rpc: &Rpc,
+    rpc: &dyn MoneroRpc,
     finality_window: i64,
 ) -> Result<()> {
     let mut h = start_height - 1;

@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use axum::{
     extract::{Path, Query, State},
     response::Response,
@@ -121,6 +123,9 @@ FROM public.blocks WHERE height = $1
 }
 
 pub async fn get_tx(State(st): State<AppState>, Path(hash): Path<String>) -> Response {
+    if !crate::util::is_hex_64(&hash) {
+        return crate::util::json_err(400, "invalid hash");
+    }
     let cache_key = format!("tx:{hash}");
     if let Some(resp) = crate::util::cached_response(&st.cache, &cache_key).await {
         return resp;
@@ -146,16 +151,67 @@ SELECT
   num_outputs
 FROM public.txs WHERE tx_hash = decode($1,'hex')
 "#,
-        hash
+        hash.as_str()
     )
     .fetch_optional(&st.db)
     .await;
 
-    match row {
-        Ok(Some(v)) => crate::util::cached_json(&st.cache, &cache_key, &v, 60).await,
-        Ok(None) => crate::util::json_err(404, "not found"),
-        Err(e) => crate::util::json_err(500, &format!("db error: {e}")),
-    }
+    let tx = match row {
+        Ok(Some(v)) => v,
+        Ok(None) => return crate::util::json_err(404, "not found"),
+        Err(e) => return crate::util::json_err(500, &format!("db error: {e}")),
+    };
+
+    let inputs = match sqlx::query_as!(
+        models::InputView,
+        r#"
+SELECT idx,
+       encode(key_image,'hex') AS "key_image!",
+       ring_size,
+       encode(pseudo_out,'hex') AS pseudo_out
+FROM public.tx_inputs
+WHERE tx_hash = decode($1,'hex')
+ORDER BY idx ASC
+"#,
+        hash.as_str()
+    )
+    .fetch_all(&st.db)
+    .await
+    {
+        Ok(v) => v,
+        Err(e) => return crate::util::json_err(500, &format!("db error: {e}")),
+    };
+
+    let outputs = match sqlx::query_as!(
+        models::OutputView,
+        r#"
+SELECT idx_in_tx,
+       global_index,
+       amount,
+       encode(commitment,'hex') AS "commitment!",
+       encode(stealth_public_key,'hex') AS "stealth_public_key!",
+       encode(spent_by_key_image,'hex') AS spent_by_key_image,
+       encode(spent_in_tx,'hex') AS spent_in_tx
+FROM public.outputs
+WHERE tx_hash = decode($1,'hex')
+ORDER BY idx_in_tx ASC
+"#,
+        hash.as_str()
+    )
+    .fetch_all(&st.db)
+    .await
+    {
+        Ok(v) => v,
+        Err(e) => return crate::util::json_err(500, &format!("db error: {e}")),
+    };
+
+    let body = models::TxDetailView {
+        tx,
+        inputs,
+        outputs,
+    };
+
+    crate::util::cached_json(&st.cache, &cache_key, &body, 60).await
 }
 
 pub async fn get_mempool(State(st): State<AppState>) -> Response {
@@ -186,6 +242,9 @@ LIMIT 1000
 }
 
 pub async fn get_tx_rings(State(st): State<AppState>, Path(hash): Path<String>) -> Response {
+    if !crate::util::is_hex_64(&hash) {
+        return crate::util::json_err(400, "invalid hash");
+    }
     let cache_key = format!("rings:{hash}");
     if let Some(resp) = crate::util::cached_response(&st.cache, &cache_key).await {
         return resp;
@@ -204,18 +263,42 @@ LEFT JOIN public.outputs o ON o.output_id = r.referenced_output_id
 WHERE r.tx_hash = decode($1,'hex')
 ORDER BY r.input_idx ASC, r.ring_index ASC
 "#,
-        hash
+        hash.as_str()
     )
     .fetch_all(&st.db)
     .await;
 
-    match rows {
-        Ok(v) => crate::util::cached_json(&st.cache, &cache_key, &v, 60).await,
-        Err(e) => crate::util::json_err(500, &format!("db error: {e}")),
+    let rows = match rows {
+        Ok(v) => v,
+        Err(e) => return crate::util::json_err(500, &format!("db error: {e}")),
+    };
+
+    let mut grouped: BTreeMap<i32, Vec<models::RingMemberView>> = BTreeMap::new();
+    for row in rows {
+        grouped
+            .entry(row.input_idx)
+            .or_default()
+            .push(models::RingMemberView {
+                ring_index: row.ring_index,
+                global_index: row.global_index,
+            });
     }
+
+    let rings: Vec<models::RingSetView> = grouped
+        .into_iter()
+        .map(|(input_idx, mut members)| {
+            members.sort_by_key(|m| m.ring_index);
+            models::RingSetView { input_idx, members }
+        })
+        .collect();
+
+    crate::util::cached_json(&st.cache, &cache_key, &rings, 60).await
 }
 
 pub async fn get_key_image(State(st): State<AppState>, Path(hex): Path<String>) -> Response {
+    if !crate::util::is_hex_64(&hex) {
+        return crate::util::json_err(400, "invalid key image");
+    }
     let cache_key = format!("ki:{hex}");
     if let Some(resp) = crate::util::cached_response(&st.cache, &cache_key).await {
         return resp;
@@ -234,7 +317,7 @@ WHERE ti.key_image = decode($1,'hex')
 ORDER BY t.block_height DESC NULLS LAST
 LIMIT 1
 "#,
-        hex
+        hex.as_str()
     )
     .fetch_optional(&st.db)
     .await;
@@ -264,7 +347,10 @@ pub async fn search(State(st): State<AppState>, Query(Q { q }): Query<Q>) -> Res
         .flatten()
         .is_some()
         {
-            return crate::util::json_ok(serde_json::json!({"kind": "tx", "value": s}));
+            return crate::util::json_ok(models::SearchResult {
+                kind: "tx".to_owned(),
+                value: serde_json::Value::String(s.to_owned()),
+            });
         }
         if sqlx::query_scalar!(
             "SELECT 1 FROM public.blocks WHERE hash = decode($1,'hex') LIMIT 1",
@@ -276,7 +362,10 @@ pub async fn search(State(st): State<AppState>, Query(Q { q }): Query<Q>) -> Res
         .flatten()
         .is_some()
         {
-            return crate::util::json_ok(serde_json::json!({"kind": "block", "value": s}));
+            return crate::util::json_ok(models::SearchResult {
+                kind: "block".to_owned(),
+                value: serde_json::Value::String(s.to_owned()),
+            });
         }
         if sqlx::query_scalar!(
             "SELECT 1 FROM public.tx_inputs WHERE key_image = decode($1,'hex') LIMIT 1",
@@ -288,7 +377,10 @@ pub async fn search(State(st): State<AppState>, Query(Q { q }): Query<Q>) -> Res
         .flatten()
         .is_some()
         {
-            return crate::util::json_ok(serde_json::json!({"kind": "key_image", "value": s}));
+            return crate::util::json_ok(models::SearchResult {
+                kind: "key_image".to_owned(),
+                value: serde_json::Value::String(s.to_owned()),
+            });
         }
     }
     if let Ok(h) = s.parse::<i64>() {
@@ -299,7 +391,10 @@ pub async fn search(State(st): State<AppState>, Query(Q { q }): Query<Q>) -> Res
             .flatten()
             .is_some()
         {
-            return crate::util::json_ok(serde_json::json!({"kind": "height", "value": h}));
+            return crate::util::json_ok(models::SearchResult {
+                kind: "height".to_owned(),
+                value: serde_json::json!(h),
+            });
         }
         if sqlx::query_scalar!(
             "SELECT 1 FROM public.outputs WHERE global_index=$1 LIMIT 1",
@@ -311,7 +406,10 @@ pub async fn search(State(st): State<AppState>, Query(Q { q }): Query<Q>) -> Res
         .flatten()
         .is_some()
         {
-            return crate::util::json_ok(serde_json::json!({"kind": "global_index", "value": h}));
+            return crate::util::json_ok(models::SearchResult {
+                kind: "global_index".to_owned(),
+                value: serde_json::json!(h),
+            });
         }
     }
     crate::util::json_err(404, "no match")
