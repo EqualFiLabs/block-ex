@@ -8,7 +8,7 @@ use tracing::{debug, info};
 use crate::{
     checkpoint::Checkpoint,
     pipeline::{SchedMsg, Shutdown},
-    rpc::MoneroRpc,
+    rpc::{Capabilities, MoneroRpc},
 };
 
 pub struct Config {
@@ -18,6 +18,8 @@ pub struct Config {
     pub start_height: Option<i64>,
     pub limit: Option<u64>,
     pub finality_window: u64,
+    pub caps: Capabilities,
+    pub header_batch: u64,
 }
 
 pub async fn run(
@@ -25,6 +27,15 @@ pub async fn run(
     cfg: Config,
     _shutdown: Option<Shutdown>,
 ) -> Result<()> {
+    if cfg.caps.headers_range {
+        info!(
+            batch = cfg.header_batch,
+            "scheduler using bulk header queues"
+        );
+    } else {
+        info!("scheduler using single header queues");
+    }
+
     let mut processed_blocks = 0u64;
 
     let mut next_height = if let Some(start) = cfg.start_height {

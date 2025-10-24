@@ -46,6 +46,14 @@ async fn main() -> Result<()> {
         .context("failed to connect to postgres")?;
     let checkpoint = Arc::new(Checkpoint::new(store.pool().clone()));
     let rpc: Arc<dyn MoneroRpc> = Arc::new(Rpc::new(&args.rpc_url));
+    let caps = rpc.probe_caps().await;
+    info!(
+        headers_range = caps.headers_range,
+        blocks_by_height_bin = caps.blocks_by_height_bin,
+        "rpc capabilities probed"
+    );
+
+    let header_batch = if caps.headers_range { 200 } else { 1 };
 
     MempoolWatcher::new(&args.zmq_url, Arc::clone(&rpc), store.clone()).spawn();
 
@@ -69,6 +77,8 @@ async fn main() -> Result<()> {
         start_height,
         limit: args.limit,
         finality_window: args.finality_window,
+        caps,
+        header_batch,
     };
 
     let scheduler = tokio::spawn(async move { work_sched::run(tx_sched, sched_cfg, None).await });
@@ -79,6 +89,8 @@ async fn main() -> Result<()> {
         limiter: limiter.clone(),
         store: store.clone(),
         finality_window: args.finality_window,
+        caps,
+        header_batch,
     };
     let mut block_handles = Vec::with_capacity(block_workers);
     for _ in 0..block_workers {

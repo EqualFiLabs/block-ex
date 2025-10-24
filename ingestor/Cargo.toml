@@ -24,6 +24,7 @@ tracing-subscriber = { version = "0.3.18", features = ["env-filter", "fmt"] }
 zmq = "0.10"
 
 [dev-dependencies]
+axum = { version = "0.7", features = ["macros", "json"] }
 httpmock = "0.7"
 rand = "0.8"
 serial_test = "3.1"

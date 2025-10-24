@@ -6,8 +6,8 @@ use ingestor::{
     limits,
     pipeline::{self, PipelineCfg},
     rpc::{
-        BlockHeader, GetBlockCountResult, GetBlockHeaderByHeightResult, GetBlockResult,
-        GetTransactionsResult, MoneroRpc,
+        BlockHeader, Capabilities, GetBlockCountResult, GetBlockHeaderByHeightResult,
+        GetBlockResult, GetTransactionsResult, MoneroRpc,
     },
     store::Store,
     work_block, work_persist, work_sched, work_tx,
@@ -60,7 +60,10 @@ async fn pipeline_persists_in_order() -> Result<()> {
         .await
         .context("connect store")?;
     let checkpoint = Arc::new(Checkpoint::new(store.pool().clone()));
-    let rpc: Arc<dyn MoneroRpc> = Arc::new(MockRpc::new(BLOCK_COUNT));
+    let mock_rpc = Arc::new(MockRpc::new(BLOCK_COUNT));
+    let caps = mock_rpc.probe_caps().await;
+    let header_batch = if caps.headers_range { 200 } else { 1 };
+    let rpc: Arc<dyn MoneroRpc> = mock_rpc.clone();
     let limiter = Arc::new(limits::make_limiter(100, false));
 
     let pipeline_cfg = PipelineCfg {
@@ -78,6 +81,8 @@ async fn pipeline_persists_in_order() -> Result<()> {
         start_height: Some(1),
         limit: Some(BLOCK_COUNT),
         finality_window: 0,
+        caps,
+        header_batch,
     };
     let scheduler = tokio::spawn(async move { work_sched::run(tx_sched, sched_cfg, None).await });
 
@@ -87,6 +92,8 @@ async fn pipeline_persists_in_order() -> Result<()> {
         limiter: limiter.clone(),
         store: store.clone(),
         finality_window: 0,
+        caps,
+        header_batch,
     };
     let mut block_handles = Vec::with_capacity(pipeline_cfg.block_workers);
     for _ in 0..pipeline_cfg.block_workers {
@@ -153,10 +160,21 @@ async fn pipeline_persists_in_order() -> Result<()> {
 
 struct MockRpc {
     blocks: Vec<MockBlock>,
+    caps: Capabilities,
 }
 
 impl MockRpc {
     fn new(count: u64) -> Self {
+        Self::with_caps(
+            count,
+            Capabilities {
+                headers_range: false,
+                blocks_by_height_bin: false,
+            },
+        )
+    }
+
+    fn with_caps(count: u64, caps: Capabilities) -> Self {
         let mut blocks = Vec::with_capacity(count as usize);
         for height in 1..=count {
             let hash = format!("{:064x}", height);
@@ -213,7 +231,7 @@ impl MockRpc {
                 tx_jsons,
             });
         }
-        Self { blocks }
+        Self { blocks, caps }
     }
 
     fn jitter(height: u64, salt: u64) -> Duration {
@@ -236,6 +254,16 @@ struct MockBlock {
 
 #[async_trait::async_trait]
 impl MoneroRpc for MockRpc {
+    async fn get_block_headers_range(&self, start: u64, end: u64) -> Result<Vec<BlockHeader>> {
+        Self::random_delay(start, 0).await;
+        Ok(self
+            .blocks
+            .iter()
+            .filter(|b| b.header.height >= start && b.header.height <= end)
+            .map(|b| b.header.clone())
+            .collect())
+    }
+
     async fn get_block_header_by_height(
         &self,
         height: u64,
@@ -301,5 +329,9 @@ impl MoneroRpc for MockRpc {
 
     async fn get_transaction_pool_hashes(&self) -> Result<Vec<String>> {
         Ok(Vec::new())
+    }
+
+    async fn probe_caps(&self) -> Capabilities {
+        self.caps
     }
 }

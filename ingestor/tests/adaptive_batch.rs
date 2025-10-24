@@ -4,8 +4,8 @@ use anyhow::Result;
 use governor::{Quota, RateLimiter};
 use ingestor::fetch::fetch_txs_adaptive;
 use ingestor::rpc::{
-    GetBlockCountResult, GetBlockHeaderByHeightResult, GetBlockResult, GetTransactionsResult,
-    MoneroRpc,
+    BlockHeader, Capabilities, GetBlockCountResult, GetBlockHeaderByHeightResult, GetBlockResult,
+    GetTransactionsResult, MoneroRpc,
 };
 use serde_json::json;
 
@@ -83,6 +83,14 @@ impl MoneroRpc for AdaptiveMockRpc {
 
     async fn get_transaction_pool_hashes(&self) -> Result<Vec<String>> {
         unimplemented!()
+    }
+
+    async fn get_block_headers_range(&self, _start: u64, _end: u64) -> Result<Vec<BlockHeader>> {
+        unimplemented!()
+    }
+
+    async fn probe_caps(&self) -> Capabilities {
+        Capabilities::default()
     }
 }
 

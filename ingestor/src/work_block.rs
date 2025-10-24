@@ -1,15 +1,15 @@
-use std::{convert::TryFrom, fmt, sync::Arc};
+use std::{collections::VecDeque, convert::TryFrom, fmt, sync::Arc};
 
 use anyhow::{anyhow, Context, Result};
 use governor::DefaultDirectRateLimiter;
 use hex::FromHex;
 use tokio::sync::{mpsc, Mutex};
-use tracing::warn;
+use tracing::{info, warn};
 
 use crate::{
     pipeline::{BlockMsg, SchedMsg, Shutdown},
     reorg::heal_reorg,
-    rpc::{BlockHeader, MoneroRpc},
+    rpc::{BlockHeader, Capabilities, MoneroRpc},
     store::Store,
 };
 
@@ -19,6 +19,8 @@ pub struct Config {
     pub limiter: Arc<DefaultDirectRateLimiter>,
     pub store: Store,
     pub finality_window: u64,
+    pub caps: Capabilities,
+    pub header_batch: u64,
 }
 
 pub async fn run(
@@ -27,6 +29,19 @@ pub async fn run(
     cfg: Config,
     _shutdown: Option<Shutdown>,
 ) -> Result<()> {
+    let mut headers = HeaderFetcher::new(
+        Arc::clone(&cfg.rpc),
+        Arc::clone(&cfg.limiter),
+        cfg.caps,
+        cfg.header_batch,
+    );
+
+    if headers.using_bulk() {
+        info!(batch = headers.batch_size(), "using bulk header fetch");
+    } else {
+        info!("using single header fetch");
+    }
+
     loop {
         let job = {
             let mut guard = rx.lock().await;
@@ -38,7 +53,7 @@ pub async fn run(
 
         let current = job;
         let block = loop {
-            match process_height(&cfg, &current).await {
+            match process_height(&cfg, &mut headers, &current).await {
                 Ok(block) => break block,
                 Err(err) => {
                     if err.downcast_ref::<ReorgDetected>().is_some() {
@@ -68,9 +83,13 @@ impl fmt::Display for ReorgDetected {
 
 impl std::error::Error for ReorgDetected {}
 
-async fn process_height(cfg: &Config, msg: &SchedMsg) -> Result<BlockMsg> {
+async fn process_height(
+    cfg: &Config,
+    headers: &mut HeaderFetcher,
+    msg: &SchedMsg,
+) -> Result<BlockMsg> {
     let height_u64 = u64::try_from(msg.height).context("height became negative")?;
-    let header = fetch_block_header(cfg.rpc.as_ref(), &cfg.limiter, height_u64).await?;
+    let header = headers.fetch(height_u64).await?;
 
     let prev_hex = header.prev_hash.clone();
     let prev_bytes = <[u8; 32]>::from_hex(&prev_hex).unwrap_or([0u8; 32]);
@@ -127,19 +146,6 @@ async fn process_height(cfg: &Config, msg: &SchedMsg) -> Result<BlockMsg> {
     })
 }
 
-async fn fetch_block_header(
-    rpc: &dyn MoneroRpc,
-    limiter: &Arc<DefaultDirectRateLimiter>,
-    height: u64,
-) -> Result<BlockHeader> {
-    limiter.until_ready().await;
-    let res = rpc
-        .get_block_header_by_height(height)
-        .await
-        .context("fetch header")?;
-    Ok(res.block_header)
-}
-
 async fn fetch_block_json(
     rpc: &dyn MoneroRpc,
     limiter: &Arc<DefaultDirectRateLimiter>,
@@ -155,6 +161,287 @@ async fn fetch_block_json(
         .json
         .ok_or_else(|| anyhow!("block json missing for height {}", header.height))?;
     Ok((json, miner_tx_hash))
+}
+
+struct HeaderFetcher {
+    rpc: Arc<dyn MoneroRpc>,
+    limiter: Arc<DefaultDirectRateLimiter>,
+    buffered: VecDeque<BlockHeader>,
+    use_range: bool,
+    batch_size: u64,
+}
+
+impl HeaderFetcher {
+    fn new(
+        rpc: Arc<dyn MoneroRpc>,
+        limiter: Arc<DefaultDirectRateLimiter>,
+        caps: Capabilities,
+        batch_size: u64,
+    ) -> Self {
+        Self {
+            rpc,
+            limiter,
+            buffered: VecDeque::new(),
+            use_range: caps.headers_range,
+            batch_size: batch_size.max(1),
+        }
+    }
+
+    fn using_bulk(&self) -> bool {
+        self.use_range
+    }
+
+    fn batch_size(&self) -> u64 {
+        self.batch_size
+    }
+
+    async fn fetch(&mut self, height: u64) -> Result<BlockHeader> {
+        if self.use_range {
+            if let Some(header) = self.take_buffered(height) {
+                return Ok(header);
+            }
+
+            match self.fill_batch(height).await {
+                Ok(_) => {
+                    if let Some(header) = self.take_buffered(height) {
+                        return Ok(header);
+                    }
+                    warn!(
+                        height,
+                        "bulk header fetch missing requested height, falling back"
+                    );
+                }
+                Err(err) => {
+                    warn!(
+                        error = ?err,
+                        start_height = height,
+                        "bulk header fetch failed, falling back"
+                    );
+                }
+            }
+
+            self.use_range = false;
+            self.buffered.clear();
+        }
+
+        self.fetch_single(height).await
+    }
+
+    async fn fill_batch(&mut self, start: u64) -> Result<()> {
+        let end = start.saturating_add(self.batch_size.saturating_sub(1));
+        self.limiter.until_ready().await;
+        let headers = self
+            .rpc
+            .get_block_headers_range(start, end)
+            .await
+            .context("fetch header range")?;
+        self.buffered = headers.into();
+        Ok(())
+    }
+
+    async fn fetch_single(&self, height: u64) -> Result<BlockHeader> {
+        self.limiter.until_ready().await;
+        let res = self
+            .rpc
+            .get_block_header_by_height(height)
+            .await
+            .context("fetch header")?;
+        Ok(res.block_header)
+    }
+
+    fn take_buffered(&mut self, height: u64) -> Option<BlockHeader> {
+        while let Some(front) = self.buffered.front() {
+            if front.height < height {
+                self.buffered.pop_front();
+            } else {
+                break;
+            }
+        }
+
+        if self
+            .buffered
+            .front()
+            .map(|hdr| hdr.height == height)
+            .unwrap_or(false)
+        {
+            return self.buffered.pop_front();
+        }
+
+        None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::limits;
+    use axum::{extract::State, response::Json, routing::post, Router};
+    use serde::Deserialize;
+    use serde_json::{json, Value};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+    use tokio::task::JoinHandle;
+
+    #[derive(Clone)]
+    struct ServerState {
+        range_calls: Arc<AtomicUsize>,
+        single_calls: Arc<AtomicUsize>,
+        fail_range: bool,
+    }
+
+    #[derive(Deserialize)]
+    struct RpcRequest {
+        id: Option<u64>,
+        method: String,
+        params: Value,
+    }
+
+    async fn spawn_server(fail_range: bool) -> (String, Arc<ServerState>, JoinHandle<()>) {
+        let state = Arc::new(ServerState {
+            range_calls: Arc::new(AtomicUsize::new(0)),
+            single_calls: Arc::new(AtomicUsize::new(0)),
+            fail_range,
+        });
+
+        let app_state = state.clone();
+        let app = Router::new()
+            .route(
+                "/json_rpc",
+                post(|State(state): State<Arc<ServerState>>, Json(req): Json<RpcRequest>| async move {
+                    let id = req.id.unwrap_or(0);
+                    let response = match req.method.as_str() {
+                        "get_block_headers_range" => {
+                            state.range_calls.fetch_add(1, Ordering::SeqCst);
+                            if state.fail_range {
+                                json!({
+                                    "jsonrpc": "2.0",
+                                    "id": id,
+                                    "error": {"code": -1, "message": "range disabled"},
+                                })
+                            } else {
+                                let start = req
+                                    .params
+                                    .get("start_height")
+                                    .and_then(Value::as_u64)
+                                    .unwrap_or(0);
+                                let end = req
+                                    .params
+                                    .get("end_height")
+                                    .and_then(Value::as_u64)
+                                    .unwrap_or(start);
+                                let headers: Vec<Value> = (start..=end)
+                                    .map(|h| header_json(h))
+                                    .collect();
+                                json!({
+                                    "jsonrpc": "2.0",
+                                    "id": id,
+                                    "result": {"status": "OK", "headers": headers},
+                                })
+                            }
+                        }
+                        "get_block_header_by_height" => {
+                            state.single_calls.fetch_add(1, Ordering::SeqCst);
+                            let height = req
+                                .params
+                                .get("height")
+                                .and_then(Value::as_u64)
+                                .unwrap_or(0);
+                            json!({
+                                "jsonrpc": "2.0",
+                                "id": id,
+                                "result": {"status": "OK", "block_header": header_json(height)},
+                            })
+                        }
+                        _ => json!({
+                            "jsonrpc": "2.0",
+                            "id": id,
+                            "error": {"code": -32601, "message": "unknown method"},
+                        }),
+                    };
+
+                    Json(response)
+                }),
+            )
+            .with_state(app_state);
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind test listener");
+        let addr = listener.local_addr().expect("listener addr");
+        let handle = tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+
+        (format!("http://{}", addr), state, handle)
+    }
+
+    fn header_json(height: u64) -> Value {
+        json!({
+            "hash": format!("{:064x}", height + 1),
+            "height": height,
+            "timestamp": height * 60,
+            "prev_hash": format!("{:064x}", height.saturating_sub(1)),
+            "major_version": 1,
+            "minor_version": 1,
+            "nonce": 0,
+            "reward": 0,
+            "block_size": 1,
+        })
+    }
+
+    #[tokio::test]
+    async fn header_fetcher_uses_range_when_available() {
+        let (base, state, handle) = spawn_server(false).await;
+        let rpc: Arc<dyn MoneroRpc> = Arc::new(crate::rpc::Rpc::new(format!("{}/json_rpc", base)));
+        let limiter = Arc::new(limits::make_limiter(100, false));
+        let mut fetcher = HeaderFetcher::new(
+            rpc,
+            limiter,
+            Capabilities {
+                headers_range: true,
+                blocks_by_height_bin: false,
+            },
+            3,
+        );
+
+        let h0 = fetcher.fetch(0).await.expect("fetch height 0");
+        assert_eq!(h0.height, 0);
+        let h1 = fetcher.fetch(1).await.expect("fetch height 1");
+        assert_eq!(h1.height, 1);
+
+        assert_eq!(state.range_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(state.single_calls.load(Ordering::SeqCst), 0);
+
+        handle.abort();
+        let _ = handle.await;
+    }
+
+    #[tokio::test]
+    async fn header_fetcher_falls_back_when_range_fails() {
+        let (base, state, handle) = spawn_server(true).await;
+        let rpc: Arc<dyn MoneroRpc> = Arc::new(crate::rpc::Rpc::new(format!("{}/json_rpc", base)));
+        let limiter = Arc::new(limits::make_limiter(100, false));
+        let mut fetcher = HeaderFetcher::new(
+            rpc,
+            limiter,
+            Capabilities {
+                headers_range: true,
+                blocks_by_height_bin: false,
+            },
+            3,
+        );
+
+        let h0 = fetcher.fetch(0).await.expect("fetch height 0");
+        assert_eq!(h0.height, 0);
+        let h1 = fetcher.fetch(1).await.expect("fetch height 1");
+        assert_eq!(h1.height, 1);
+
+        assert!(state.range_calls.load(Ordering::SeqCst) >= 1);
+        assert_eq!(state.single_calls.load(Ordering::SeqCst), 2);
+
+        handle.abort();
+        let _ = handle.await;
+    }
 }
 
 fn extract_tx_hashes(block: &serde_json::Value) -> Vec<String> {
