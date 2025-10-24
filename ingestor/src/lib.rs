@@ -1,3 +1,4 @@
+pub mod analytics;
 pub mod checkpoint;
 pub mod cli;
 pub mod codec;

@@ -1,7 +1,7 @@
-use clap::Parser;
+use clap::Args as ClapArgs;
 
-#[derive(Parser, Debug)]
-pub struct Args {
+#[derive(ClapArgs, Debug)]
+pub struct RunArgs {
     #[arg(long, env = "DATABASE_URL")]
     pub database_url: String,
     #[arg(

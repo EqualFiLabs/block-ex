@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT analytics_pending FROM public.blocks WHERE height = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "analytics_pending",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "9afa7bc982d4082e916e17ae1d806f57b55a878aeaead9c0599f56cbf41dd63b"
+}

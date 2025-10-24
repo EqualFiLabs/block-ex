@@ -1,4 +1,4 @@
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use serial_test::serial;
 use std::env;
 use std::ffi::OsString;
@@ -10,7 +10,7 @@ fn parse_defaults() {
     env::remove_var("RPC_RPS");
     env::remove_var("BOOTSTRAP");
     env::remove_var("CONCURRENCY");
-    let mut v = vec![OsString::from("ingestor")];
+    let mut v = vec![OsString::from("ingestor"), OsString::from("run")];
     v.push("--database-url".into());
     v.push("postgres://x:x@localhost/x".into());
     let args = super_args(v);
@@ -28,6 +28,7 @@ fn parse_env_overrides() {
     env::remove_var("CONCURRENCY");
     let args = super_args(vec![
         OsString::from("ingestor"),
+        OsString::from("run"),
         OsString::from("--database-url"),
         OsString::from("postgres://x:x@localhost/x"),
     ]);
@@ -40,12 +41,26 @@ fn parse_env_overrides() {
     env::remove_var("CONCURRENCY");
 }
 
-fn super_args<I>(itr: I) -> Args
+fn super_args<I>(itr: I) -> RunArgs
 where
     I: IntoIterator<Item = OsString>,
 {
-    Args::parse_from(itr)
+    let cli = TestCli::parse_from(itr);
+    match cli.command {
+        TestCmd::Run(args) => args,
+    }
 }
 
 // Bring in Args
-use ingestor::cli::Args;
+use ingestor::cli::RunArgs;
+
+#[derive(Parser)]
+struct TestCli {
+    #[command(subcommand)]
+    command: TestCmd,
+}
+
+#[derive(Subcommand)]
+enum TestCmd {
+    Run(RunArgs),
+}

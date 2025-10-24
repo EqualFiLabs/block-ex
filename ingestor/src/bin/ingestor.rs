@@ -1,10 +1,11 @@
 use std::{convert::TryFrom, env, sync::Arc};
 
 use anyhow::{Context, Result};
-use clap::Parser;
+use clap::{Args as ClapArgs, Parser, Subcommand};
 use ingestor::{
+    analytics,
     checkpoint::Checkpoint,
-    cli::Args,
+    cli::RunArgs,
     limits,
     mempool::MempoolWatcher,
     pipeline::{self, PipelineCfg},
@@ -15,6 +16,27 @@ use ingestor::{
 use tokio::sync::Mutex;
 use tracing::{error, info};
 use tracing_subscriber::EnvFilter;
+
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Cli {
+    #[command(subcommand)]
+    command: Cmd,
+}
+
+#[derive(Subcommand, Debug)]
+enum Cmd {
+    Run(RunArgs),
+    AnalyticsBackfill(BackfillArgs),
+}
+
+#[derive(ClapArgs, Debug)]
+struct BackfillArgs {
+    #[arg(long, env = "DATABASE_URL")]
+    database_url: String,
+    #[arg(long, env = "BATCH", default_value_t = 1000)]
+    batch: i64,
+}
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -32,8 +54,25 @@ async fn main() -> Result<()> {
         }
     }
 
-    let args = Args::parse();
+    let cli = Cli::parse();
 
+    match cli.command {
+        Cmd::Run(args) => run(args).await,
+        Cmd::AnalyticsBackfill(args) => analytics_backfill(args).await,
+    }
+}
+
+async fn analytics_backfill(args: BackfillArgs) -> Result<()> {
+    info!("connecting to database");
+    let store = Store::connect(&args.database_url)
+        .await
+        .context("failed to connect to postgres")?;
+    let processed = analytics::backfill(store.pool(), args.batch).await?;
+    info!(processed, "analytics backfill complete");
+    Ok(())
+}
+
+async fn run(args: RunArgs) -> Result<()> {
     let limiter = Arc::new(limits::make_limiter(args.rpc_rps, args.bootstrap));
     let conc = limits::eff_concurrency(args.ingest_concurrency, args.bootstrap);
     let block_workers = conc.max(1).min(4);
@@ -50,7 +89,7 @@ async fn main() -> Result<()> {
     info!(
         headers_range = caps.headers_range,
         blocks_by_height_bin = caps.blocks_by_height_bin,
-        "rpc capabilities probed"
+        "rpc capabilities probed",
     );
 
     let header_batch = if caps.headers_range { 200 } else { 1 };
