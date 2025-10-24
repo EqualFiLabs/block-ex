@@ -1,18 +1,40 @@
 ---
 source: api/tests/blocks_endpoints.rs
-assertion_line: 180
+assertion_line: 174
 expression: normalized
 ---
 [
   {
-    "hash": "ac16709883f23083c2f0759960f85ba7a0c2edbb020b800996e032955ec323ff",
-    "height": 1,
+    "hash": "0000000000000000000000000000000000000000000000000000000000000003",
+    "height": 3,
     "height_offset": 0,
     "major_version": 1,
-    "minor_version": 16,
-    "reward_nanos": 17592169267200,
-    "size_bytes": 273,
-    "ts": 1761169471,
-    "tx_count": 1
+    "minor_version": 1,
+    "reward_nanos": 0,
+    "size_bytes": 1,
+    "ts": 300,
+    "tx_count": 3
+  },
+  {
+    "hash": "0000000000000000000000000000000000000000000000000000000000000002",
+    "height": 2,
+    "height_offset": 1,
+    "major_version": 1,
+    "minor_version": 1,
+    "reward_nanos": 0,
+    "size_bytes": 1,
+    "ts": 200,
+    "tx_count": 3
+  },
+  {
+    "hash": "0000000000000000000000000000000000000000000000000000000000000001",
+    "height": 1,
+    "height_offset": 2,
+    "major_version": 1,
+    "minor_version": 1,
+    "reward_nanos": 0,
+    "size_bytes": 1,
+    "ts": 100,
+    "tx_count": 3
   }
 ]

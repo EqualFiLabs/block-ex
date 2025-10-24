@@ -26,7 +26,9 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["HealthResponse"];
+                    };
                 };
             };
         };
@@ -63,7 +65,18 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["BlockView"][];
+                    };
+                };
+                /** @description Database error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
                 };
             };
         };
@@ -99,14 +112,27 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["BlockView"];
+                    };
                 };
-                /** @description Not Found */
+                /** @description Block not found */
                 404: {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Database error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
                 };
             };
         };
@@ -142,14 +168,36 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["TxDetailView"];
+                    };
                 };
-                /** @description Not Found */
+                /** @description Invalid transaction hash */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Transaction not found */
                 404: {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Database error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
                 };
             };
         };
@@ -168,7 +216,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get ring members for a tx */
+        /** Get ring members for a transaction, grouped by input */
         get: {
             parameters: {
                 query?: never;
@@ -185,7 +233,27 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["RingSetView"][];
+                    };
+                };
+                /** @description Invalid transaction hash */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Database error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
                 };
             };
         };
@@ -219,7 +287,18 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["MempoolView"][];
+                    };
+                };
+                /** @description Database error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
                 };
             };
         };
@@ -255,14 +334,36 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["KeyImageView"];
+                    };
                 };
-                /** @description Not Found */
+                /** @description Invalid key image */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Key image not found */
                 404: {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Database error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
                 };
             };
         };
@@ -298,14 +399,63 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["SearchResult"];
+                    };
                 };
-                /** @description No Match */
+                /** @description No match */
                 404: {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Database error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api-docs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Retrieve OpenAPI specification */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": Record<string, never>;
+                    };
                 };
             };
         };
@@ -320,7 +470,97 @@ export interface paths {
 }
 export type webhooks = Record<string, never>;
 export interface components {
-    schemas: never;
+    schemas: {
+        ErrorResponse: {
+            error: string;
+        };
+        HealthResponse: {
+            /** @enum {string} */
+            status: "ok";
+        };
+        BlockView: {
+            /** Format: int64 */
+            height: number;
+            hash?: string | null;
+            /** Format: int64 */
+            ts?: number | null;
+            size_bytes: number;
+            major_version: number;
+            minor_version: number;
+            tx_count: number;
+            /** Format: int64 */
+            reward_nanos: number;
+        };
+        TxView: {
+            hash?: string | null;
+            /** Format: int64 */
+            block_height?: number | null;
+            /** Format: int64 */
+            ts?: number | null;
+            in_mempool: boolean;
+            /** Format: int64 */
+            fee_nanos?: number | null;
+            size_bytes: number;
+            version: number;
+            /** Format: int64 */
+            unlock_time: number;
+            extra_json?: string | null;
+            rct_type: number;
+            proof_type?: string | null;
+            bp_plus: boolean;
+            num_inputs: number;
+            num_outputs: number;
+        };
+        InputView: {
+            idx: number;
+            key_image: string;
+            ring_size: number;
+            pseudo_out?: string | null;
+        };
+        OutputView: {
+            idx_in_tx: number;
+            /** Format: int64 */
+            global_index?: number | null;
+            amount?: string | null;
+            commitment: string;
+            stealth_public_key: string;
+            spent_by_key_image?: string | null;
+            spent_in_tx?: string | null;
+        };
+        TxDetailView: components["schemas"]["TxView"] & {
+            inputs: components["schemas"]["InputView"][];
+            outputs: components["schemas"]["OutputView"][];
+        };
+        RingMemberView: {
+            ring_index: number;
+            /** Format: int64 */
+            global_index?: number | null;
+        };
+        RingSetView: {
+            input_idx: number;
+            members: components["schemas"]["RingMemberView"][];
+        };
+        MempoolView: {
+            hash?: string | null;
+            /** Format: int64 */
+            first_seen?: number | null;
+            /** Format: int64 */
+            last_seen?: number | null;
+            fee_rate?: string | null;
+            relayed_by?: string | null;
+        };
+        KeyImageView: {
+            key_image?: string | null;
+            spending_tx?: string | null;
+            /** Format: int64 */
+            block_height?: number | null;
+        };
+        SearchResult: {
+            /** @enum {string} */
+            kind: "block" | "tx" | "key_image" | "height" | "global_index";
+            value: string | number;
+        };
+    };
     responses: never;
     parameters: never;
     requestBodies: never;

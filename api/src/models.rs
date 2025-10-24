@@ -38,6 +38,18 @@ pub struct RingView {
     pub global_index: Option<i64>,
 }
 
+#[derive(Serialize)]
+pub struct RingMemberView {
+    pub ring_index: i32,
+    pub global_index: Option<i64>,
+}
+
+#[derive(Serialize)]
+pub struct RingSetView {
+    pub input_idx: i32,
+    pub members: Vec<RingMemberView>,
+}
+
 #[derive(Serialize, sqlx::FromRow)]
 pub struct KeyImageView {
     pub key_image: Option<String>,
@@ -58,4 +70,31 @@ pub struct MempoolView {
 pub struct SearchResult {
     pub kind: String,
     pub value: serde_json::Value,
+}
+
+#[derive(Serialize, sqlx::FromRow)]
+pub struct InputView {
+    pub idx: i32,
+    pub key_image: String,
+    pub ring_size: i32,
+    pub pseudo_out: Option<String>,
+}
+
+#[derive(Serialize, sqlx::FromRow)]
+pub struct OutputView {
+    pub idx_in_tx: i32,
+    pub global_index: Option<i64>,
+    pub amount: Option<rust_decimal::Decimal>,
+    pub commitment: String,
+    pub stealth_public_key: String,
+    pub spent_by_key_image: Option<String>,
+    pub spent_in_tx: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct TxDetailView {
+    #[serde(flatten)]
+    pub tx: TxView,
+    pub inputs: Vec<InputView>,
+    pub outputs: Vec<OutputView>,
 }

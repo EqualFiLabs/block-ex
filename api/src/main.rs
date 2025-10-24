@@ -13,7 +13,10 @@ use config::Config;
 use sqlx::PgPool;
 use state::AppState;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tower::limit::GlobalConcurrencyLimitLayer;
+use tower::{
+    limit::{GlobalConcurrencyLimitLayer, RateLimitLayer},
+    Layer,
+};
 use tower_http::{compression::CompressionLayer, timeout::TimeoutLayer, trace::TraceLayer};
 use tracing_subscriber::{fmt, EnvFilter};
 
@@ -44,7 +47,7 @@ async fn main() -> Result<()> {
 
     let state = AppState { db, cache };
 
-    let app = Router::new()
+    let router = Router::new()
         .route("/healthz", get(routes::healthz))
         .merge(routes::v1_router())
         .with_state(state)
@@ -52,6 +55,8 @@ async fn main() -> Result<()> {
         .layer(GlobalConcurrencyLimitLayer::new(1024))
         .layer(TimeoutLayer::new(Duration::from_secs(10)))
         .layer(TraceLayer::new_for_http());
+
+    let app = RateLimitLayer::new(cfg.max_requests_per_sec, Duration::from_secs(1)).layer(router);
 
     let listener = tokio::net::TcpListener::bind(&cfg.bind).await?;
     tracing::info!("api listening on {}", cfg.bind);

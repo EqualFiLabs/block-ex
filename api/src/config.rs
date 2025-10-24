@@ -12,4 +12,6 @@ pub struct Config {
     pub network: String,
     #[arg(long, env = "FINALITY_WINDOW", default_value_t = 30)]
     pub finality_window: u32,
+    #[arg(long, env = "MAX_REQUESTS_PER_SEC", default_value_t = 200)]
+    pub max_requests_per_sec: u64,
 }

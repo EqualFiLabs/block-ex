@@ -6,6 +6,7 @@ use axum::{
 use redis::aio::ConnectionManager;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
+use tracing::debug;
 
 pub fn json_ok<T: Serialize>(data: T) -> Response {
     let payload = serde_json::to_vec(&data).unwrap();
@@ -41,7 +42,10 @@ pub async fn cached_response(cache: &ConnectionManager, key: &str) -> Option<Res
         .query_async::<_, Option<Vec<u8>>>(&mut conn)
         .await
     {
-        Ok(Some(bytes)) => Some(make_json_response(bytes, StatusCode::OK)),
+        Ok(Some(bytes)) => {
+            debug!(cache_key = key, "cache hit");
+            Some(make_json_response(bytes, StatusCode::OK))
+        }
         _ => None,
     }
 }
@@ -57,4 +61,8 @@ fn make_json_response(payload: Vec<u8>, status: StatusCode) -> Response {
         )
         .body(Body::from(payload))
         .unwrap()
+}
+
+pub fn is_hex_64(value: &str) -> bool {
+    value.len() == 64 && value.chars().all(|c| c.is_ascii_hexdigit())
 }
