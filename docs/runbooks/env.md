@@ -24,6 +24,14 @@ These variables configure the ingestor and API. Copy `.env.example` to `.env` an
 
 - `REDIS_URL`  
   Redis connection string for API caching. Default: `redis://redis:6379` in Docker; `redis://127.0.0.1:6379` locally.
+- `BOOTSTRAP`  
+  Set to `true` to enable the high-throughput mode (higher RPC rate limit, doubled concurrency, analytics deferred). Leave `false` in steady state.
+- `INGEST_CONCURRENCY`  
+  Number of concurrent block/tx workers. Default: `8`. Increase (e.g., `16`) when bootstrapping a fresh database.
+- `RPC_RPS`  
+  Maximum JSON-RPC requests per second enforced by the ingestor’s rate limiter. Default: `10`. Raise cautiously when running against local daemons you control.
+- `START_HEIGHT` / `LIMIT`  
+  Optional lower bound and block count for partial syncs; mostly useful for diagnostics or replaying a small window.
 
 ## Usage
 

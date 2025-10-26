@@ -4,26 +4,133 @@ x-common-env: &common-env
   RUST_LOG: "info"
 
 services:
-  monerod:
+  monerod0:
     image: ghcr.io/sethforprivacy/simple-monerod:latest
     restart: unless-stopped
     command:
-      - "--stagenet"
-      - "--prune-blockchain"
-      - "--rpc-bind-port=38083"
-      - "--rpc-restricted-bind-port=38081"
-      - "--confirm-external-bind"
-      - "--out-peers=32"
-      - "--in-peers=32"
-      - "--enable-dns-blocklist"
+      - --stagenet
+      - --p2p-bind-port=58080
+      - --rpc-bind-port=58081
+      - --rpc-bind-ip=0.0.0.0
+      - --zmq-rpc-bind-port=58082
+      - --zmq-rpc-bind-ip=0.0.0.0
+      - --no-igd
+      - --hide-my-port
+      - --log-level=0
+      - --p2p-bind-ip=0.0.0.0
+      - --confirm-external-bind
+      - --add-exclusive-node=monerod1:51080
+      - --add-exclusive-node=monerod2:52080
+      - --add-exclusive-node=monerod3:53080
+      - --fixed-difficulty=2000
+      - --disable-rpc-ban
     ports:
-      - "38081:38081"  # RPC
-      - "38082:38082"  # ZMQ
+      - "58081:58081"  # RPC
+      - "58082:58082"  # ZMQ
+      - "58080:58080"   # P2P
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:38081/json_rpc"]
+      test: ["CMD", "curl", "-sf", "http://localhost:58081/json_rpc"]
       interval: 30s
       timeout: 3s
       retries: 20
+    volumes:
+      - ./data/node_01:/home/monero/.bitmonero
+
+  monerod1:
+    image: ghcr.io/sethforprivacy/simple-monerod:latest
+    restart: unless-stopped
+    command:
+      - --stagenet
+      - --p2p-bind-port=51080
+      - --rpc-bind-port=51081
+      - --rpc-bind-ip=0.0.0.0
+      - --zmq-rpc-bind-port=51082
+      - --zmq-rpc-bind-ip=0.0.0.0
+      - --no-igd
+      - --hide-my-port
+      - --log-level=0
+      - --p2p-bind-ip=0.0.0.0
+      - --confirm-external-bind
+      - --add-exclusive-node=monerod0:58080
+      - --add-exclusive-node=monerod2:52080
+      - --add-exclusive-node=monerod3:53080
+      - --fixed-difficulty=2000
+      - --disable-rpc-ban
+    ports:
+      - "51081:51081"  # RPC
+      - "51082:51082"  # ZMQ
+      - "51080:51080"   # P2P
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:51081/json_rpc"]
+      interval: 30s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - ./data/node_02:/home/monero/.bitmonero
+
+  monerod2:
+    image: ghcr.io/sethforprivacy/simple-monerod:latest
+    restart: unless-stopped
+    command:
+      - --stagenet
+      - --p2p-bind-port=52080
+      - --rpc-bind-port=52081
+      - --rpc-bind-ip=0.0.0.0
+      - --zmq-rpc-bind-port=52082
+      - --zmq-rpc-bind-ip=0.0.0.0
+      - --no-igd
+      - --hide-my-port
+      - --log-level=0
+      - --p2p-bind-ip=0.0.0.0
+      - --confirm-external-bind
+      - --add-exclusive-node=monerod0:58080
+      - --add-exclusive-node=monerod1:51080
+      - --add-exclusive-node=monerod3:53080
+      - --fixed-difficulty=2000
+      - --disable-rpc-ban
+    ports:
+      - "52081:52081"  # RPC
+      - "52082:52082"  # ZMQ
+      - "52080:52080"   # P2P
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:52081/json_rpc"]
+      interval: 30s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - ./data/node_03:/home/monero/.bitmonero
+
+  monerod3:
+    image: ghcr.io/sethforprivacy/simple-monerod:latest
+    restart: unless-stopped
+    command:
+      - --stagenet
+      - --p2p-bind-port=53080
+      - --rpc-bind-port=53081
+      - --rpc-bind-ip=0.0.0.0
+      - --zmq-rpc-bind-port=53082
+      - --zmq-rpc-bind-ip=0.0.0.0
+      - --no-igd
+      - --hide-my-port
+      - --log-level=0
+      - --p2p-bind-ip=0.0.0.0
+      - --confirm-external-bind
+      - --add-exclusive-node=monerod0:58080
+      - --add-exclusive-node=monerod1:51080
+      - --add-exclusive-node=monerod2:52080
+      - --fixed-difficulty=2000
+      - --disable-rpc-ban
+    ports:
+      - "53081:53081"  # RPC
+      - "53082:53082"  # ZMQ
+      - "53080:53080"   # P2P
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:53081/json_rpc"]
+      interval: 30s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - ./data/node_04:/home/monero/.bitmonero
 
   postgres:
     image: explorer-postgres:dev
@@ -61,7 +168,7 @@ services:
       dockerfile: ops/Dockerfile.api
     pull_policy: never
     depends_on:
-      monerod:
+      monerod0:
         condition: service_healthy
       postgres:
         condition: service_healthy
@@ -70,8 +177,8 @@ services:
     environment:
       <<: *common-env
       DATABASE_URL: "postgres://explorer:explorer@postgres:5432/explorer"
-      XMR_RPC_URL: "http://monerod:38081/json_rpc"
-      XMR_ZMQ_URL: "tcp://monerod:38082"
+      XMR_RPC_URL: "http://monerod0:58081/json_rpc"
+      XMR_ZMQ_URL: "tcp://monerod0:58082"
       REDIS_URL: "redis://redis:6379"
     ports:
       - "8081:8081"
@@ -89,15 +196,19 @@ services:
       dockerfile: ops/Dockerfile.ingestor
     pull_policy: never
     depends_on:
-      monerod:
+      monerod0:
         condition: service_healthy
       postgres:
         condition: service_healthy
     environment:
       <<: *common-env
       DATABASE_URL: "postgres://explorer:explorer@postgres:5432/explorer"
-      XMR_RPC_URL: "http://monerod:38081/json_rpc"
-      XMR_ZMQ_URL: "tcp://monerod:38082"
+      XMR_RPC_URL: "http://monerod0:58081/json_rpc"
+      XMR_ZMQ_URL: "tcp://monerod0:58082"
+      BOOTSTRAP: "true"
+      INGEST_CONCURRENCY: "16"
+      RPC_RPS: "40"
+    command: ["run"]
     restart: unless-stopped
 
   web:
@@ -109,8 +220,6 @@ services:
     depends_on:
       api:
         condition: service_healthy
-    environment:
-      API_BASE_URL: "http://api:8081"
     ports:
       - "8080:8080"
     restart: unless-stopped

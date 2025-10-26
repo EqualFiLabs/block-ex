@@ -12,7 +12,7 @@ RUN cargo build -p ingestor --release --locked
 # --- Runtime (distroless)
 FROM gcr.io/distroless/cc-debian12:nonroot AS runtime
 WORKDIR /app
-COPY --from=builder /app/target/release/ingestor /app/ingestor
+COPY --from=builder /app/target/release/ingestor_bin /app/ingestor
 USER nonroot:nonroot
 ENTRYPOINT ["/app/ingestor"]
 CMD []

@@ -20,6 +20,10 @@ COPY <<'CADDY' /etc/caddy/Caddyfile
   root * /srv
   file_server
   encode zstd gzip
+
+  handle /api/* {
+    reverse_proxy api:8081
+  }
 }
 CADDY
 EXPOSE 8080

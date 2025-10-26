@@ -19,4 +19,4 @@ Thumbs.db
 .idea/
 .vscode/
 
-web/node_modules/
+web/node_modules/.sqlx/

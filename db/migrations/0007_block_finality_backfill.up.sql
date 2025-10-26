@@ -1,5 +1,3 @@
--- migrate:up
-
 ALTER TABLE public.blocks
   ADD COLUMN IF NOT EXISTS confirmations INTEGER DEFAULT 0;
 
@@ -21,14 +19,3 @@ ALTER TABLE ingestor_checkpoint
   ALTER COLUMN finalized_height SET NOT NULL;
 
 UPDATE ingestor_checkpoint SET finalized_height = COALESCE(finalized_height, 0);
-
--- migrate:down
-
-ALTER TABLE public.blocks
-  DROP COLUMN IF EXISTS confirmations;
-
-ALTER TABLE public.blocks
-  DROP COLUMN IF EXISTS is_final;
-
-ALTER TABLE ingestor_checkpoint
-  DROP COLUMN IF EXISTS finalized_height;

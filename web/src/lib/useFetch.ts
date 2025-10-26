@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { apiUrl } from "./api";
 
 export function useFetch<T>(path: string) {
   const [data, setData] = useState<T | null>(null);
@@ -6,7 +7,7 @@ export function useFetch<T>(path: string) {
 
   useEffect(() => {
     const ctrl = new AbortController();
-    fetch(`${import.meta.env.VITE_API_BASE}${path}`, { signal: ctrl.signal })
+    fetch(apiUrl(path), { signal: ctrl.signal })
       .then((r) => {
         if (!r.ok) throw new Error(`${r.status}`);
         return r.json();

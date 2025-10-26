@@ -1,5 +1,3 @@
--- migrate:up
-
 -- A ring per input; ring_members link inputs to referenced outputs by global index
 CREATE TABLE IF NOT EXISTS public.rings (
   tx_hash        BYTEA    NOT NULL,
@@ -48,13 +46,3 @@ ALTER TABLE public.txs
   ADD CONSTRAINT chk_mempool_flag
   CHECK ((in_mempool = TRUE AND block_height IS NULL AND block_timestamp IS NULL)
          OR (in_mempool = FALSE));
-
--- migrate:down
-
-ALTER TABLE IF EXISTS public.txs DROP CONSTRAINT IF EXISTS chk_mempool_flag;
-
-DROP TABLE IF EXISTS public.mempool_tx_stats;
-DROP TABLE IF EXISTS public.mempool_txs;
-
-DROP TABLE IF EXISTS public.ring_members;
-DROP TABLE IF EXISTS public.rings;

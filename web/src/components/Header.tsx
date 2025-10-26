@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
+import { apiUrl } from "../lib/api";
 
 export default function Header() {
   const [q, setQ] = useState("");
@@ -8,7 +9,10 @@ export default function Header() {
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
-    const url = new URL(`/api/v1/search`, import.meta.env.VITE_API_BASE);
+    const target = apiUrl("/api/v1/search");
+    const url = target.startsWith("http")
+      ? new URL(target)
+      : new URL(target, window.location.origin);
     url.searchParams.set("q", q.trim());
     try {
       const r = await fetch(url.toString());

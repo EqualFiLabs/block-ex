@@ -1,5 +1,3 @@
--- migrate:up
-
 -- Install pg_partman (safe if already installed)
 CREATE SCHEMA IF NOT EXISTS partman;
 CREATE EXTENSION IF NOT EXISTS pg_partman WITH SCHEMA partman;
@@ -44,14 +42,3 @@ SELECT partman.run_maintenance();
 -- Helpful indexes on soft_facts
 CREATE INDEX IF NOT EXISTS idx_soft_facts_ts ON public.soft_facts (block_timestamp);
 CREATE INDEX IF NOT EXISTS idx_soft_facts_fee ON public.soft_facts (total_fee);
-
--- migrate:down
-
-DROP INDEX IF EXISTS idx_soft_facts_fee;
-DROP INDEX IF EXISTS idx_soft_facts_ts;
-
-DROP TABLE IF EXISTS public.soft_facts;
-
--- pg_partman config removal (non-destructive; leaves existing partitions)
-DROP EXTENSION IF EXISTS pg_partman;
-DROP SCHEMA IF EXISTS partman CASCADE;
